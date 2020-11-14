@@ -2,9 +2,6 @@
 # path on host vm where current directory is mounted
 APP_PATH=/app
 
-#DOCKER_COMPOSE_FILE=$(APP_NAME).yml
-DOCKER_COMPOSE_FILE=docker-compose.yml
-
 TOP=..
 include $(TOP)/Makefile.common
 
@@ -40,9 +37,11 @@ FORCE_CONTAINER_CREATION=0
 
 # these should match the definitions in the other config files (and should
 # actually be extracted from them dynamically but...)
+SERVICES=web redis
 SERVICE_PROTO=tcp
-EXTERNAL_PORT=5000
-INSTANCE_PORT=5000
+# WIP - could be multiple ports exposed...
+EXTERNAL_PORT=$(DEDUPLIFIER_EXTERNAL_PORT)
+INSTANCE_PORT=$(EXTERNAL_PORT)
 
 .PHONY=all
 

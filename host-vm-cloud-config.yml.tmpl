@@ -1,0 +1,40 @@
+# this content taken from https://github.com/canonical/multipass/issues/1488
+#cloud-config
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+users:
+- name: ubuntu
+  shell: /bin/bash
+  sudo:
+    - ALL=(ALL) NOPASSWD:ALL
+
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - software-properties-common
+  #- iptables-persistent
+
+runcmd:
+  # install docker
+  - sudo apt update -y && sudo apt upgrade -y
+  - sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+  - sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu bionic stable"
+  - sudo apt update -y
+  - sudo apt install -y docker-ce
+  - sudo usermod -aG docker ubuntu
+  # install microk8s
+  #- sudo snap install microk8s --classic --channel=1.18/stable
+  #- sudo iptables -P FORWARD ACCEPT
+  #- sudo usermod -a -G microk8s ubuntu
+  #- sudo chown -f -R ubuntu ~/.kube
+  #- sudo echo "{ \"insecure-registries\" : [\"localhost:32000\"] }" > /etc/docker/daemon.json
+  #- echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
+  #- echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
+  #- sudo apt install -y iptables-persistent
+  
+final_message: "The system is finally up, after $UPTIME seconds"
