@@ -43,16 +43,16 @@ runcmd:
   #
   #- sudo apt install -y netfilter-persistent
   #
-  # get docker-compose package from github$
-  - sudo curl -L "https://github.com/docker/compose/releases/download/1.27.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose$
-  - sudo chmod +x /usr/local/bin/docker-compose$
-  $
-  # set iptables forwarding on local host to expose the container host vm$
-  # - can this not be done via the cloud-init file?$
-  #- sudo $(FORWARD_PORT) $(APP_HOST) $(EXTERNAL_INTERFACE) $(SERVICE_PROTO) $(EXTERNAL_PORT) $(INSTANCE_PORT))$
-  $
-  # finally, mount code repository to finish setup from the new host vm$
-  #multipass mount $(PWD) $(APP_HOST):$(APP_PATH)$
+  # get docker-compose package from github
+  - sudo curl -L "https://github.com/docker/compose/releases/download/1.27.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+  - sudo chmod +x /usr/local/bin/docker-compose
+  
+  # set iptables forwarding on local host to expose the container host vm
+  # - can this not be done via the cloud-init file?
+  #- sudo $(FORWARD_PORT) $(APP_HOST) $(EXTERNAL_INTERFACE) $(SERVICE_PROTO) $(EXTERNAL_PORT) $(INSTANCE_PORT))
+  
+  # finally, mount code repository to finish setup from the new host vm
+  #multipass mount $(PWD) $(APP_HOST):$(APP_PATH)
 
   
 final_message: "The system is finally up, after $UPTIME seconds"
