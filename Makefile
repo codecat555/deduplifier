@@ -1,6 +1,6 @@
 
 # path on host vm where current directory is mounted
-APP_PATH=/app
+APP_PATH=/code
 
 TOP=..
 include $(TOP)/Makefile.common
@@ -11,7 +11,7 @@ APP_NAME=deduplifier
 
 APP_HOST=$(APP_NAME)-host
 
-INSTALL_DIR=/app/$(APP_NAME)/
+INSTALL_DIR=/code/$(APP_NAME)/
 
 THIRD_PARTY_DIR=$(TOP)/$(APP_NAME)/third-party-stuff
 
