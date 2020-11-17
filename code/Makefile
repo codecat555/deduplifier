@@ -1,17 +1,14 @@
 
-# path on host vm where current directory is mounted
-APP_PATH=/code
-
-TOP=..
 include $(TOP)/Makefile.common
+
+# path on host vm where current directory is mounted
+CODE_PATH=$(APP_PATH)/code
 
 ## new-vm definitions
 
-APP_NAME=deduplifier
+#APP_NAME=deduplifier
 
 APP_HOST=$(APP_NAME)-host
-
-INSTALL_DIR=/code/$(APP_NAME)/
 
 THIRD_PARTY_DIR=$(TOP)/$(APP_NAME)/third-party-stuff
 
@@ -43,9 +40,9 @@ SERVICE_PROTO=tcp
 EXTERNAL_PORT=$(DEDUPLIFIER_EXTERNAL_PORT)
 INSTANCE_PORT=$(EXTERNAL_PORT)
 
-.PHONY=all
+.PHONY=build
 
-all: $(CREATE_DOCKER_HOST_VM) $(CREATE_DOCKER_CONTAINERS)
+build: $(CREATE_DOCKER_HOST_VM) $(CREATE_DOCKER_CONTAINERS)
 
 include $(TOP)/Makefile.post
 

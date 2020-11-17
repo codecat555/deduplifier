@@ -1,18 +1,29 @@
 version: "3.8"
 services:
   web:
-    build: .
+    build:
+        context: .
+        dockerfile: web-Dockerfile
+        args:
+            port: 5000
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
-      - .:/code
+      - .:___CODE_PATH___
     ports:
       - "___EXTERNAL_PORT___:___INSTANCE_PORT___"
     depends_on:
       - db
 
   db:
+    build:
+        context: .
+        dockerfile: db-Dockerfile
+        args:
+            port: 6000
     image: postgres
     environment:
+      - PGDATA=/app/db
       - POSTGRES_DB=___APP_NAME___
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
+      - PGSETUP_INITDB_OPTIONS="--auth=trust"
