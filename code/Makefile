@@ -6,8 +6,6 @@ CODE_PATH=$(APP_PATH)/code
 
 ## new-vm definitions
 
-#APP_NAME=deduplifier
-
 APP_HOST=$(APP_NAME)-host
 
 THIRD_PARTY_DIR=$(TOP)/$(APP_NAME)/third-party-stuff
