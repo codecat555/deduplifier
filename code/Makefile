@@ -43,7 +43,7 @@ WEB_INSTANCE_PORT=$(WEB_EXTERNAL_PORT)
 
 # this value dictated by postgres (by the docker image we're using)
 DB_EXTERNAL_PORT=6881
-DB_INSTANCE_PORT=5432
+DB_INSTANCE_PORT=3368
 
 .PHONY=build
 

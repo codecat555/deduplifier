@@ -14,23 +14,25 @@ services:
     depends_on:
       - db
 
+  # some port config hints found at https://stackoverflow.com/questions/37775702/changing-a-postgres-containers-server-port-in-docker-compose
   db:
     restart: always
     build:
         context: .
         dockerfile: db-Dockerfile
-#        args:
-#            port: ___DB_INSTANCE_PORT___
     image: postgres
     environment:
       - PGDATA=/app/db
-#      - PGPORT=___DB_INSTANCE_PORT___
+      - PGPORT=___DB_INSTANCE_PORT___
       - POSTGRES_DB=___APP_NAME___
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - PGSETUP_INITDB_OPTIONS="--auth=trust"
+    command: -p ___DB_INSTANCE_PORT___ # the port on which to listen
+    expose:
+      - "___DB_INSTANCE_PORT___" # export post to other containers (not to host)
     ports:
-      - "___DB_EXTERNAL_PORT___:___DB_INSTANCE_PORT___"
+      - "___DB_EXTERNAL_PORT___:___DB_INSTANCE_PORT___" # map external port to internal port
 
   redis:
       image: "redis:alpine"
