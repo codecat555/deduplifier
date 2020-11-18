@@ -1,6 +1,7 @@
 version: "3.8"
 services:
   web:
+    restart: always
     build:
         context: .
         dockerfile: web-Dockerfile
@@ -14,18 +15,22 @@ services:
       - db
 
   db:
+    restart: always
     build:
         context: .
         dockerfile: db-Dockerfile
-        args:
-            port: ___DB_INSTANCE_PORT___
+#        args:
+#            port: ___DB_INSTANCE_PORT___
     image: postgres
     environment:
       - PGDATA=/app/db
+#      - PGPORT=___DB_INSTANCE_PORT___
       - POSTGRES_DB=___APP_NAME___
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - PGSETUP_INITDB_OPTIONS="--auth=trust"
+    ports:
+      - "___DB_EXTERNAL_PORT___:___DB_INSTANCE_PORT___"
 
   redis:
       image: "redis:alpine"

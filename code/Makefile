@@ -41,9 +41,9 @@ SERVICE_PROTO=tcp
 WEB_EXTERNAL_PORT=$(DEDUPLIFIER_EXTERNAL_PORT)
 WEB_INSTANCE_PORT=$(WEB_EXTERNAL_PORT)
 
-# just a random number
+# this value dictated by postgres (by the docker image we're using)
 DB_EXTERNAL_PORT=6881
-DB_INSTANCE_PORT=$(DB_EXTERNAL_PORT)
+DB_INSTANCE_PORT=5432
 
 .PHONY=build
 
