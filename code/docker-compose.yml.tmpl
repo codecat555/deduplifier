@@ -1,6 +1,7 @@
 version: "3.8"
 services:
   web:
+    working_dir: ___CODE_PATH___
     restart: always
     build:
         context: .
@@ -17,6 +18,8 @@ services:
   # some port config hints found at https://stackoverflow.com/questions/37775702/changing-a-postgres-containers-server-port-in-docker-compose
   db:
     restart: always
+    volumes:
+            - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
     build:
         context: .
         dockerfile: db-Dockerfile
