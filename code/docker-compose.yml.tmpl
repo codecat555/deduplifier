@@ -5,12 +5,11 @@ services:
         context: .
         dockerfile: web-Dockerfile
         args:
-            port: 5000
-    command: python manage.py runserver 0.0.0.0:8000
+            port: ___WEB_INSTANCE_PORT___
     volumes:
       - .:___CODE_PATH___
     ports:
-      - "___EXTERNAL_PORT___:___INSTANCE_PORT___"
+      - "___WEB_EXTERNAL_PORT___:___WEB_INSTANCE_PORT___"
     depends_on:
       - db
 
@@ -19,7 +18,7 @@ services:
         context: .
         dockerfile: db-Dockerfile
         args:
-            port: 6000
+            port: ___DB_INSTANCE_PORT___
     image: postgres
     environment:
       - PGDATA=/app/db
@@ -27,3 +26,7 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - PGSETUP_INITDB_OPTIONS="--auth=trust"
+
+  redis:
+      image: "redis:alpine"
+

@@ -3,7 +3,9 @@
 
 package_update: true
 package_upgrade: true
-package_reboot_if_required: true
+# right now this setting is causing the image not to boot (or finish rebooting) - a
+# problem with an update or what? and why is there noutput showing the problem?
+#package_reboot_if_required: true
 
 users:
 - name: ubuntu

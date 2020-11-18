@@ -36,9 +36,14 @@ FORCE_CONTAINER_CREATION=0
 # actually be extracted from them dynamically but...)
 SERVICES=web redis
 SERVICE_PROTO=tcp
-# WIP - could be multiple ports exposed...
-EXTERNAL_PORT=$(DEDUPLIFIER_EXTERNAL_PORT)
-INSTANCE_PORT=$(EXTERNAL_PORT)
+
+# WIP - at some point we could need multiple ports exposed, but let's ignore that for now...
+WEB_EXTERNAL_PORT=$(DEDUPLIFIER_EXTERNAL_PORT)
+WEB_INSTANCE_PORT=$(WEB_EXTERNAL_PORT)
+
+# just a random number
+DB_EXTERNAL_PORT=6881
+DB_INSTANCE_PORT=$(DB_EXTERNAL_PORT)
 
 .PHONY=build
 
