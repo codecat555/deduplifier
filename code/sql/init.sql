@@ -20,3 +20,12 @@ CREATE TABLE file (
     CONSTRAINT fk_location FOREIGN KEY(location_id) REFERENCES location(id)
 );
 
+DROP TABLE IF EXISTS image_file CASCADE;
+CREATE TABLE image_file (
+    id INT GENERATED ALWAYS AS IDENTITY,
+    file_id INT NOT NULL,
+    name VARCHAR(1024) NOT NULL,
+    imagehash_fingerprint VARCHAR(1024),
+    PRIMARY KEY(id),
+    CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id)
+);
