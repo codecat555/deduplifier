@@ -3,6 +3,7 @@ include $(TOP)/Makefile.common
 
 # path on host vm where current directory is mounted
 CODE_PATH=$(APP_PATH)/code
+DB_PATH=$(APP_PATH)/db
 
 ## new-vm definitions
 
