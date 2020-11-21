@@ -28,8 +28,8 @@ services:
       - PGDATA=___DB_PATH___
       - PGPORT=___DB_INSTANCE_PORT___
       - POSTGRES_DB=___APP_NAME___
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_USER=___DB_USER___
+      - POSTGRES_PASSWORD=___DB_USER___
       - PGSETUP_INITDB_OPTIONS=--auth=trust
     expose:
       - ___DB_INSTANCE_PORT___ # export post to other containers (not to host)
