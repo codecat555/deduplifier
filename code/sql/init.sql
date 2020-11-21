@@ -1,7 +1,12 @@
 
+--
+-- multipass exec deduplifier-host -- docker exec -it deduplifier_db_1 su - postgres -c 'psql -d deduplifier -h localhost -p 3368 -f /app/code/sql/init.sql'
+--
+
 DROP DATABASE IF EXISTS deduplifier;
 CREATE DATABASE deduplifier;
-CONNECT TO deduplifier;
+\connect deduplifier;
+
 
 --DROP TABLE IF EXISTS host CASCADE;
 CREATE TABLE host (
@@ -60,18 +65,19 @@ CREATE TABLE file (
     CONSTRAINT fk_location FOREIGN KEY(location_id) REFERENCES location(id)
 );
 
+--DROP TABLE IF EXISTS image CASCADE;
+CREATE TABLE image (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(1024) NOT NULL,
+    imagehash_fingerprint VARCHAR(1024)
+);
+
 --DROP TABLE IF EXISTS image_file CASCADE;
 CREATE TABLE image_file (
     file_id INT NOT NULL,
     image_id INT NOT NULL,
-    CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id)
+    CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id),
     CONSTRAINT fk_image FOREIGN KEY(image_id) REFERENCES image(id)
 );
 
---DROP TABLE IF EXISTS image CASCADE;
-CREATE TABLE image (
-    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
-    name VARCHAR(1024) NOT NULL,
-    imagehash_fingerprint VARCHAR(1024)
-
-);
+\d
