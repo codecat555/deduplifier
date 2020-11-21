@@ -1,4 +1,1 @@
-db-Dockerfile
-docker-compose.yml
-host-vm-cloud-config.yml
-web-Dockerfile
+db
