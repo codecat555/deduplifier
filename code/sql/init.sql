@@ -80,4 +80,6 @@ CREATE TABLE image_file (
     CONSTRAINT fk_image FOREIGN KEY(image_id) REFERENCES image(id)
 );
 
+-- describe tables, views and sequences
 \d
+
