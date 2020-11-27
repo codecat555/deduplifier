@@ -8,6 +8,8 @@ add_file(
     filepath text,
     sepchar text,
     filename text,
+    checksum text,
+    checksum_type text,
     create_date timestamp with time zone,
     modify_date timestamp with time zone,
     access_date timestamp with time zone,
@@ -30,7 +32,7 @@ BEGIN
 
     INSERT INTO location VALUES(DEFAULT, host_id, drive_id, volume_id, path_id) RETURNING id INTO location_id;
 
-    INSERT INTO file VALUES(DEFAULT, location_id, filename, create_date, modify_date, access_date, discover_date) RETURNING id INTO file_id;
+    INSERT INTO file VALUES(DEFAULT, location_id, filename, checksum, checksum_type, create_date, modify_date, access_date, discover_date) RETURNING id INTO file_id;
 
     RETURN file_id;
 END;
@@ -38,33 +40,78 @@ $$;
 
 CREATE OR REPLACE FUNCTION
 upsert_path(
-    filepath text,
+    remaining_path text,
     sepchar text
 )
 RETURNS integer LANGUAGE plpgsql AS $$
 DECLARE
-    subpath TEXT;
+    insert_string TEXT;
     pos INTEGER;
     parent_id INTEGER;
     path_id INTEGER;
 BEGIN
-    raise notice 'filepath is %, subpath is %', filepath, subpath;
-    WHILE (length(filepath) > 0) LOOP
-        pos := position(sepchar IN filepath);
-        raise notice 'pos is %', pos;
+    raise notice 'insert_string is %, remaining_path is %', insert_string, remaining_path;
+    WHILE (length(remaining_path) > 0) LOOP
+        pos := position(sepchar IN remaining_path);
+        --raise notice 'pos is %', pos;
         IF (pos = 0) THEN
-            subpath := filepath;
-            filepath := NULL;
+            insert_string := remaining_path;
+            remaining_path := NULL;
         ELSE
-            subpath := substring(filepath for pos-1);
-            filepath := substring(filepath from pos+1);
+            insert_string := substring(remaining_path for pos-1);
+            remaining_path := substring(remaining_path from pos+1);
         END IF;
-        IF (length(subpath) > 0) THEN
-            INSERT INTO path VALUES(DEFAULT, path_id, subpath) ON CONFLICT (parent_path_id, path) DO UPDATE SET path = EXCLUDED.path RETURNING id, parent_path_id INTO path_id, parent_id;
-            raise notice 'filepath is %, subpath is %, path_id is %, parent_id is %', filepath, subpath, path_id, parent_id;
+
+        IF (length(insert_string) > 0) THEN
+            raise notice 'insert_string is %, remaining_path is %, parent_id is %', insert_string, remaining_path, parent_id;
+
+            BEGIN
+                INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
+            EXCEPTION
+                WHEN unique_violation THEN
+                    raise notice '  - handling unique violation, path_id is %', path_id;
+            END;
+
+            raise notice '  - INSERT returned path_id %', path_id;
+            parent_id := path_id;
+        ELSE
+            raise notice 'insert_string is empty, looping...';
         END IF;
     END LOOP;
-    raise notice 'returning path_id %', path_id;
+    raise notice '=> returning path_id %', path_id;
     RETURN path_id;
 END;
 $$;
+
+-- from https://stackoverflow.com/questions/7624919/check-if-a-user-defined-type-already-exists-in-postgresql
+DO $$ BEGIN
+    CREATE TYPE image_data AS (
+        image_id integer,
+        image_file_id integer
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE OR REPLACE FUNCTION
+add_image(
+    file_id integer,
+    imagehash_fingerprint text
+)
+RETURNS RECORD LANGUAGE plpgsql AS $$
+DECLARE
+    image_id INTEGER;
+    image_file_id INTEGER;
+    retval image_data;
+BEGIN
+    INSERT INTO image VALUES(DEFAULT, imagehash_fingerprint) ON CONFLICT (name) DO UPDATE SET imagehash_fingerprint = EXCLUDED.imagehash_fingerprint RETURNING id INTO image_id;
+
+    INSERT INTO image_file VALUES(DEFAULT, file_id, image_id) RETURNING id INTO image_file_id;
+
+    retval.image_id := image_id;
+    retval.image_file_id := image_file_id;
+
+    RETURN retval;
+END;
+$$;
+

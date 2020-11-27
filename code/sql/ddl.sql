@@ -7,39 +7,37 @@ DROP DATABASE IF EXISTS deduplifier;
 CREATE DATABASE deduplifier;
 \connect deduplifier;
 
---DROP TABLE IF EXISTS host CASCADE;
-CREATE TABLE host (
+CREATE TABLE IF NOT EXISTS host (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
     name VARCHAR(253) NOT NULL UNIQUE,
     PRIMARY KEY(id)
 );
 
---DROP TABLE IF EXISTS drive CASCADE;
-CREATE TABLE drive (
+CREATE TABLE IF NOT EXISTS drive (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
     serialno VARCHAR(64) NOT NULL UNIQUE,
     PRIMARY KEY(id)
 );
 
---DROP TABLE IF EXISTS volume CASCADE;
-CREATE TABLE volume (
+CREATE TABLE IF NOT EXISTS volume (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
     uuid VARCHAR(40) NOT NULL UNIQUE,
     PRIMARY KEY(id)
 );
 
---DROP TABLE IF EXISTS path CASCADE;
-CREATE TABLE path (
+CREATE TABLE IF NOT EXISTS path (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
-    parent_path_id INTEGER,
-    path VARCHAR(40) NOT NULL,
+    parent_path_id INTEGER REFERENCES path,
+    name VARCHAR(40) NOT NULL,
     PRIMARY KEY(id),
-    UNIQUE(parent_path_id, path),
-    CONSTRAINT fk_parent_path FOREIGN KEY(parent_path_id) REFERENCES path(id)
+    UNIQUE(parent_path_id, name)
 );
+-- this index enables the UNIQUE constraint above even when parent_path_id is NULL
+-- see https://stackoverflow.com/questions/8289100/create-unique-constraint-with-null-columns
+CREATE UNIQUE INDEX path_idx1 ON path(parent_path_id, name) WHERE parent_path_id IS NOT NULL;
+CREATE UNIQUE INDEX path_idx2 ON path(name) WHERE parent_path_id IS NULL;
 
---DROP TABLE IF EXISTS location CASCADE;
-CREATE TABLE location (
+CREATE TABLE IF NOT EXISTS location (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
     host_id INTEGER NOT NULL,
     drive_id INTEGER NOT NULL,
@@ -52,11 +50,12 @@ CREATE TABLE location (
     CONSTRAINT fk_path FOREIGN KEY(path_id) REFERENCES path(id)
 );
 
---DROP TABLE IF EXISTS file CASCADE;
-CREATE TABLE file (
+CREATE TABLE IF NOT EXISTS file (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
     location_id INTEGER NOT NULL,
     name VARCHAR(1024) NOT NULL,
+    checksum TEXT,
+    checksum_type TEXT,
     create_date DATE NOT NULL,
     modify_date DATE NOT NULL,
     access_date DATE NOT NULL,
@@ -65,15 +64,13 @@ CREATE TABLE file (
     CONSTRAINT fk_location FOREIGN KEY(location_id) REFERENCES location(id)
 );
 
---DROP TABLE IF EXISTS image CASCADE;
-CREATE TABLE image (
+CREATE TABLE IF NOT EXISTS image (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     --name VARCHAR(1024) NOT NULL,
     imagehash_fingerprint VARCHAR(1024)
 );
 
---DROP TABLE IF EXISTS image_file CASCADE;
-CREATE TABLE image_file (
+CREATE TABLE IF NOT EXISTS image_file (
     file_id INTEGER NOT NULL,
     image_id INTEGER NOT NULL,
     CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id),
