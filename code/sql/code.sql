@@ -50,6 +50,7 @@ DECLARE
     parent_id INTEGER;
     path_id INTEGER;
 BEGIN
+    raise warning 'THIS CODE DOES NOT WORK PROPERLY AS-iS...RETAINED JUST FOR DOC PURPOSES.';
     raise notice 'insert_string is %, remaining_path is %', insert_string, remaining_path;
     WHILE (length(remaining_path) > 0) LOOP
         pos := position(sepchar IN remaining_path);
@@ -63,14 +64,13 @@ BEGIN
         END IF;
 
         IF (length(insert_string) > 0) THEN
-            raise notice 'insert_string is %, remaining_path is %, parent_id is %', insert_string, remaining_path, parent_id;
+            raise notice 'parent_id is %, insert_string is %, remaining_path is %', insert_string, remaining_path, parent_id;
 
-            BEGIN
-                INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
-            EXCEPTION
-                WHEN unique_violation THEN
-                    raise notice '  - handling unique violation, path_id is %', path_id;
-            END;
+            --INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) WHERE parent_path_id IS NULL DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
+            --INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (name) WHERE parent_path_id IS NULL DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
+            --INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
+            --INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) WHERE parent_path_id IS NULL DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
+            INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
 
             raise notice '  - INSERT returned path_id %', path_id;
             parent_id := path_id;

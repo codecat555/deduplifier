@@ -25,17 +25,32 @@ CREATE TABLE IF NOT EXISTS volume (
     PRIMARY KEY(id)
 );
 
+-- self-referencing table, requires special handling due to possible NULL values (because
+-- NULL values are never equal to each other). this is accomplished with the UNIQUE indexes
+-- below and use of use of WHERE clause for ON CONFLICT part of the INSERT statment (see
+-- upsert_path() function).
+--
+-- we could instead insert up front a bogus "root" node with id 0 rather than using nulls. that
+-- would simplify things, but this solution currently works so let it be for now.
+-- for more background, see:
+--   https://stackoverflow.com/questions/8289100/create-unique-constraint-with-null-column://dba.stackexchange.com/questions/151431/postgresql-upsert-issue-with-null-values
+--   https://stackoverflow.com/questions/8289100/create-unique-constraint-with-null-columns
+--
 CREATE TABLE IF NOT EXISTS path (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
     parent_path_id INTEGER REFERENCES path,
     name VARCHAR(40) NOT NULL,
     PRIMARY KEY(id),
+    -- due to possible NULL values for parent_path_id, this must be enforced with the
+    -- UNIQUE indexes defined below.
     UNIQUE(parent_path_id, name)
 );
 -- this index enables the UNIQUE constraint above even when parent_path_id is NULL
--- see https://stackoverflow.com/questions/8289100/create-unique-constraint-with-null-columns
 CREATE UNIQUE INDEX path_idx1 ON path(parent_path_id, name) WHERE parent_path_id IS NOT NULL;
-CREATE UNIQUE INDEX path_idx2 ON path(name) WHERE parent_path_id IS NULL;
+--CREATE UNIQUE INDEX path_idx2 ON path(name) WHERE parent_path_id IS NULL;
+CREATE UNIQUE INDEX path_idx2 ON path(parent_path_id, name) WHERE parent_path_id IS NULL;
+-- insert bogus root node (NOT USED, just for documentation)
+--INSERT INTO path OVERRIDING SYSTEM VALUE VALUES (0, NULL, '');
 
 CREATE TABLE IF NOT EXISTS location (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
