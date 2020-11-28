@@ -47,10 +47,11 @@ RETURNS integer LANGUAGE plpgsql AS $$
 DECLARE
     insert_string TEXT;
     pos INTEGER;
-    parent_id INTEGER;
+    parent_id INTEGER := 0;
     path_id INTEGER;
 BEGIN
-    raise warning 'THIS CODE DOES NOT WORK PROPERLY AS-iS...RETAINED JUST FOR DOC PURPOSES.';
+    -- remove inital separator
+    remaining_path := TRIM(LEADING sepchar FROM remaining_path);
     raise notice 'insert_string is %, remaining_path is %', insert_string, remaining_path;
     WHILE (length(remaining_path) > 0) LOOP
         pos := position(sepchar IN remaining_path);
@@ -63,20 +64,12 @@ BEGIN
             remaining_path := substring(remaining_path from pos+1);
         END IF;
 
-        IF (length(insert_string) > 0) THEN
-            raise notice 'parent_id is %, insert_string is %, remaining_path is %', insert_string, remaining_path, parent_id;
+        raise notice 'parent_id is %, insert_string is %, remaining_path is %', parent_id, insert_string, remaining_path;
 
-            --INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) WHERE parent_path_id IS NULL DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
-            --INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (name) WHERE parent_path_id IS NULL DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
-            --INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
-            --INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) WHERE parent_path_id IS NULL DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
-            INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
+        INSERT INTO path VALUES(DEFAULT, parent_id, insert_string) ON CONFLICT (parent_path_id, name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO path_id;
 
-            raise notice '  - INSERT returned path_id %', path_id;
-            parent_id := path_id;
-        ELSE
-            raise notice 'insert_string is empty, looping...';
-        END IF;
+        raise notice '  - INSERT returned path_id %', path_id;
+        parent_id := path_id;
     END LOOP;
     raise notice '=> returning path_id %', path_id;
     RETURN path_id;
