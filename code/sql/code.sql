@@ -17,24 +17,25 @@ add_file(
 )
 RETURNS integer LANGUAGE plpgsql AS $$
 DECLARE
-    host_id INTEGER;
-    drive_id INTEGER;
-    volume_id INTEGER;
-    path_id INTEGER;
-    location_id INTEGER;
-    file_id INTEGER;
+    v_host_id INTEGER;
+    v_drive_id INTEGER;
+    v_volume_id INTEGER;
+    v_path_id INTEGER;
+    v_location_id INTEGER;
+    v_file_id INTEGER;
 BEGIN
-    INSERT INTO host   VALUES(DEFAULT, hostname)   ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO host_id;
-    INSERT INTO drive  VALUES(DEFAULT, drivename)  ON CONFLICT (serialno) DO UPDATE SET serialno = EXCLUDED.serialno RETURNING id INTO drive_id;
-    INSERT INTO volume VALUES(DEFAULT, volumename) ON CONFLICT (uuid) DO UPDATE SET uuid = EXCLUDED.uuid RETURNING id INTO volume_id;
+    INSERT INTO host   VALUES(DEFAULT, hostname)   ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO v_host_id;
+    INSERT INTO drive  VALUES(DEFAULT, drivename)  ON CONFLICT (serialno) DO UPDATE SET serialno = EXCLUDED.serialno RETURNING id INTO v_drive_id;
+    INSERT INTO volume VALUES(DEFAULT, volumename) ON CONFLICT (uuid) DO UPDATE SET uuid = EXCLUDED.uuid RETURNING id INTO v_volume_id;
 
-    path_id := upsert_path(filepath, sepchar);
+    v_path_id := upsert_path(filepath, sepchar);
 
-    INSERT INTO location VALUES(DEFAULT, host_id, drive_id, volume_id, path_id) RETURNING id INTO location_id;
+    --INSERT INTO location VALUES(DEFAULT, v_host_id, v_drive_id, v_volume_id, v_path_id) RETURNING id INTO v_location_id;
+    INSERT INTO location VALUES(DEFAULT, v_host_id, v_drive_id, v_volume_id, v_path_id) ON CONFLICT (host_id, drive_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
 
-    INSERT INTO file VALUES(DEFAULT, location_id, filename, checksum, checksum_type, create_date, modify_date, access_date, discover_date) RETURNING id INTO file_id;
+    INSERT INTO file VALUES(DEFAULT, v_location_id, filename, checksum, checksum_type, create_date, modify_date, access_date, discover_date) RETURNING id INTO v_file_id;
 
-    RETURN file_id;
+    RETURN v_file_id;
 END;
 $$;
 

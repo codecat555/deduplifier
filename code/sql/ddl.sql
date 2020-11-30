@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS volume (
     PRIMARY KEY(id)
 );
 
+-- for background on various ways of representing/managing hierarchical data:
+--    https://schinckel.net/2014/11/27/postgres-tree-shootout-part-2%3A-adjacency-list-using-ctes/
+--    https://bitworks.software/en/2017-10-20-storing-trees-in-rdbms.html
+--    https://www.postgresqltutorial.com/postgresql-self-join/
+--    https://stackoverflow.com/questions/47341764/self-referencing-table-sql-query
+--    https://persagen.com/2018/06/06/postgresql_trees_recursive_cte.html
 CREATE TABLE IF NOT EXISTS path (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
     parent_path_id INTEGER REFERENCES path,
@@ -32,11 +38,12 @@ CREATE TABLE IF NOT EXISTS path (
     PRIMARY KEY(id),
     UNIQUE(parent_path_id, name)
 );
--- this index enables the UNIQUE constraint above even when parent_path_id is NULL
---CREATE UNIQUE INDEX path_idx1 ON path(parent_path_id, name) WHERE parent_path_id IS NOT NULL;
---CREATE UNIQUE INDEX path_idx2 ON path(name) WHERE parent_path_id IS NULL;
-CREATE UNIQUE INDEX path_idx2 ON path(parent_path_id, name) WHERE parent_path_id IS NULL;
 -- initialize with bogus root node (to avoid headaches associated with using NULL values)
+-- for more info about NULL values complications, see:
+--    https://dba.stackexchange.com/questions/151431/postgresql-upsert-issue-with-null-values
+--    https://stackoverflow.com/questions/34708509/how-to-use-returning-with-on-conflict-in-postgresql/42217872#42217872
+--    https://stackoverflow.com/questions/34708509/how-to-use-returning-with-on-conflict-in-postgresql/42217872#42217872
+--    https://stackoverflow.com/questions/35949877/how-to-include-excluded-rows-in-returning-from-insert-on-conflict/35953488#35953488
 INSERT INTO path OVERRIDING SYSTEM VALUE VALUES (0, NULL, '');
 
 CREATE TABLE IF NOT EXISTS location (
@@ -49,7 +56,8 @@ CREATE TABLE IF NOT EXISTS location (
     CONSTRAINT fk_host FOREIGN KEY(host_id) REFERENCES host(id),
     CONSTRAINT fk_drive FOREIGN KEY(drive_id) REFERENCES drive(id),
     CONSTRAINT fk_volume FOREIGN KEY(volume_id) REFERENCES volume(id),
-    CONSTRAINT fk_path FOREIGN KEY(path_id) REFERENCES path(id)
+    CONSTRAINT fk_path FOREIGN KEY(path_id) REFERENCES path(id),
+    UNIQUE(host_id, drive_id, volume_id, path_id)
 );
 
 CREATE TABLE IF NOT EXISTS file (
@@ -63,20 +71,22 @@ CREATE TABLE IF NOT EXISTS file (
     access_date DATE NOT NULL,
     discover_date DATE NOT NULL,
     PRIMARY KEY(id),
-    CONSTRAINT fk_location FOREIGN KEY(location_id) REFERENCES location(id)
+    CONSTRAINT fk_location FOREIGN KEY(location_id) REFERENCES location(id),
+    UNIQUE(location_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS image (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     --name VARCHAR(1024) NOT NULL,
-    imagehash_fingerprint VARCHAR(1024)
+    imagehash_fingerprint VARCHAR(1024) UNIQUE
 );
 
 CREATE TABLE IF NOT EXISTS image_file (
     file_id INTEGER NOT NULL,
     image_id INTEGER NOT NULL,
     CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id),
-    CONSTRAINT fk_image FOREIGN KEY(image_id) REFERENCES image(id)
+    CONSTRAINT fk_image FOREIGN KEY(image_id) REFERENCES image(id),
+    UNIQUE(file_id, image_id)
 );
 
 -- describe tables, views and sequences
