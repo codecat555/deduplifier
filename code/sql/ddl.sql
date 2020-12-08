@@ -75,6 +75,20 @@ CREATE TABLE IF NOT EXISTS file (
     UNIQUE(location_id, name)
 );
 
+CREATE TABLE IF NOT EXISTS exif_tags (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name TEXT NOT NULL,
+);
+
+CREATE TABLE IF NOT EXISTS image_tags (
+    exif_tag_id INTEGER NOT NULL,
+    image_id INTEGER NOT NULL,
+    value TEXT NOT NULL,
+    CONSTRAINT fk_exif_tag FOREIGN KEY(exif_tag_id) REFERENCES exif_tag(id),
+    CONSTRAINT fk_image FOREIGN KEY(image_id) REFERENCES image(id)
+    UNIQUE(exif_tag_id, image_id)
+);
+
 CREATE TABLE IF NOT EXISTS image (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     --name VARCHAR(1024) NOT NULL,

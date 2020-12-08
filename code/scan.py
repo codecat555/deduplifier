@@ -1,19 +1,40 @@
 
+#
+# install required modules: 
+#   python3 -m pip install --upgrade pip
+#   pip install python-magic-bin
+#   pip install Pillow
+#   pip install psycopg2
+#   pip install filehash
+#
 import sys
 import os
 import stat
 import time
 
+import platform
+
+import subprocess
+
 import multiprocessing as mp
 
 import magic
 
+# from package Pillow
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
+
+import psycopg2
+from psycopg2 import Error
+from db_config import connection_parameters
 
 #import imagehash
 
 from filehash import FileHash
+
+if platform.system() == 'Windows':
+    import wmi
+    wmiobj = wmi.WMI()
 
 WORKER_COUNT = 1
 MAIN_LOOP_SLEEP_INTERVAL = 3
@@ -21,22 +42,186 @@ QUEUE_DRAIN_SLEEP_INTERVAL = 1
 EXCLUDED_TAGS = [ 59932, 59933 ]
 
 mime = magic.Magic(mime=True)
-hasher = FileHash('sha256')
+hash_type = 'sha256'
+hasher = FileHash(hash_type)
 
-def upsert_image(path, tags):
+class InternalError(Exception):
+    pass
+#    def __str__(self):
+#        return "Internal error: 
+
+################
+
+#def add_file(*add_file_args):
+#    cursor = conn.cursor()
+#    try:
+#        cursor.callproc('add_file', *add_file_args)
+#        result = cursor.fetchall()
+#        print(f"add_file() result is {result}")
+#
+#        conn.commit()
+#    except(Exception, psycopg2.DatabaseError) as error:
+#        print(f'Error calling db: {error}')
+#        conn.rollback()
+#    finally:
+#        if(conn):
+#            cursor.close()
+#            conn.close()
+#
+#if __name__ == '__main__':
+#    try:
+#        conn = psycopg2.connect(**connection_parameters)
+#    except (Exception, psycopg2.Error) as e:
+#        print(f'Error connecting to db: {e}')
+#
+#    args = [
+#        'myagent',
+#        'myhost',
+#        'drivename',
+#        'volname',
+#        '/a/d/a/x',
+#        '/',
+#        'lola.jpg',
+#        'ff15659bad5d6090dccfaa0f4208a7d0a201fcda',
+#        'SHA1',
+#        '11/25/2020 2:15',
+#        '11/25/2020 2:15',
+#        '11/25/2020 2:15',
+#        '11/25/2020 2:15'
+#    ]
+#    if len(sys.argv) > 1:
+#        args = sys.argv[1:]
+#
+#    add_file(args)
+
+################
+
+def upsert_image(conn, path, tags):
     print(f'upsert_image({os.getpid()}): upserting with tags: {path}')
+
+    with conn.cursor() as cursor:
+        pass
+
     return 1
 
-def upsert_file(path, hash, mimetype):
-    print(f'upsert_file({os.getpid()}): upserting file with hash: {hash} - {path} ({mimetype})')
+def get_drivename(path):
+    print(f'get_drivename({os.getpid()}): path is {path}')
+    if platform.system() == 'Linux':
+        result = 1
+    elif platform.system() == 'Windows':
+
+        assert(wmiobj is not None)
+
+        #raise Exception("Windows support not implemented yet, can't get drive name")
+        result = 1
+    else:
+        raise Exception(f"unsupported system ({platform.system()}), can't get drive name")
+
+    print(f'get_drivename({os.getpid()}): result is {result}')
+    return result
+
+def get_volname(path):
+    print(f'get_volname({os.getpid()}): path is {path}')
+    if platform.system() == 'Linux':
+        # see https://askubuntu.com/questions/1096813/how-to-get-uuid-partition-form-a-given-file-path-in-python
+        completed_process = subprocess.run(
+            ['/usr/bin/bash', '-c', f'/usr/sbin/blkid -o value $(/usr/bin/df --output=source {path} | tail -1) | head -1'],
+            check=True,
+            text=True,
+            capture_output=True
+        )
+        result = completed_process.stdout.rstrip()
+    elif platform.system() == 'Windows':
+## successful example
+##  >>> subprocess.run(["powershell", "-Command", r"(Get-Partition -DriveLetter ([System.IO.Path]::GetPathRoot('C:\Users\me\Pictures\2015-02-21\20150221_135026.jpg').Split(':')[0])).Guid" ], capture_output=True, text=True)
+##  CompletedProcess(args=['powershell', '-Command', "(Get-Partition -DriveLetter ([System.IO.Path]::GetPathRoot('C:\\Users\\me\\Pictures\\2015-02-21\\20150221_135026.jpg').Split(':')[0])).Guid"], returncode=0, stdout='{445e65f9-aabb-4531-b4b8-7745f786cd96}\n', stderr='')
+#
+#        completed_process = subprocess.run(["powershell", "-Command", r"(Get-Partition -DriveLetter ([System.IO.Path]::GetPathRoot('C:\Users\me\Pictures\2015-02-21\20150221_135026.jpg').Split(':')[0])).Guid" ], capture_output=True, text=True, check=True)
+#        
+#        completed_process = subprocess.run(
+#        [r'powershell.exe', r'-Command', r"(Get-Partition -DriveLetter ([System.IO.Path]::GetPathRoot('C:\Users\me\Pictures\2015-02-21\20150221_135026.jpg').Split(':')[0])).Guid"],
+#            check=True,
+#            text=True,
+#            capture_output=True
+#        )
+#
+#
+#  >>> path = r'C:\Users\me\Pictures\2015-02-21\20150221_135026.jpg'
+#  >>> command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{path}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
+#  >>> completed_process = subprocess.run(
+#  ...     [r'powershell.exe', r'-Command', command_string],
+#  ...     #check=True,
+#  ...     text=True,
+#  ...     capture_output=True
+#  ... )
+#  >>> print(completed_process.stdout)
+#  {445e65f9-aabb-4531-b4b8-7745f786cd96}
+#
+#
+#  >>> path = r'\\nuage\me\Documents\dev\deduplifier\code\testdata\2020-11-21\009.jpg'
+#  >>> command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{path}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
+#  >>> completed_process = None
+#  >>> completed_process = subprocess.run(
+#  ...     [r'powershell.exe', r'-Command', command_string],
+#  ...     #check=True,
+#  ...     text=True,
+#  ...     capture_output=True
+#  ... )
+#  >>> print(completed_process.stdout)
+#  {f51db7df-56af-4da4-801c-a9afdd3a8802}
+#  >>> print(completed_process.stdout.strip('{}\n'))
+#  f51db7df-56af-4da4-801c-a9afdd3a8802
+#  >>>
+#  >>>
+#
+#
+        command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{path}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
+        completed_process = subprocess.run(
+            [r'powershell.exe', r'-Command', command_string],
+            check=True,
+            text=True,
+            capture_output=True
+        )
+        #print(f'get_volname({os.getpid()}): raw output is {completed_process.stdout}')
+        result = completed_process.stdout.strip('{}\n')
+    else:
+        raise Exception(f"unsupported system ({platform.system()}), can't get drive name")
+
+    print(f'get_volname({os.getpid()}): result is {result}')
+    return result
+
+def upsert_file(conn, path, statinfo, hash, mimetype):
+    print(f'upsert_file({os.getpid()}): upserting file with hash {hash} and type {mimetype} - {path}')
+
+    agent_id = os.getpid()
+
+    args = [
+        agent_id,
+        platform.node(),
+        get_drivename(path),
+        get_volname(path),
+        os.path.dirname(path),
+        os.path.sep,
+        os.path.basename(path),
+        hash,
+        hash_type,
+        time.ctime(statinfo.st_ctime),
+        time.ctime(statinfo.st_mtime),
+        time.ctime(statinfo.st_atime),
+        time.ctime()
+    ]
+
+    with conn.cursor() as cursor:
+        pass
+
     return 1
 
-def upsert_image_file(file_id, image_id):
-    print(f'upsert_file({os.getpid()}): upserting image-file relation between image {image_id} and file {file_id}')
+def upsert_image_file(conn, file_id, image_id):
+    print(f'upsert_image_file({os.getpid()}): upserting image-file relation between image {image_id} and file {file_id}')
     pass
 
-def process_image_file(path, mimetype):
-    print(f'({os.getpid()})process_image_file: processing image file: {path} ({mimetype})')
+def process_image_file(conn, path, mimetype):
+    print(f'process_image_file({os.getpid()}): processing image file: {path} ({mimetype})')
 
     # capture (and filter) the image tags, for upload
     tags = {}
@@ -95,83 +280,112 @@ def process_image_file(path, mimetype):
                         pass
 
                 #if tag != 'UserComment' and tag != 'ComponentsConfiguration':
-                if tag != 'UserComment':
+                if tag != 'UserComment' and tag != 'MakerNote':
                     print(f'process_image_file({os.getpid()}): {tag}: {data}')
 
                 assert(tag not in tags)
                 tags[tag] = data
+        print()
 
     # upsert image in db
-    image_id = upsert_image(path, tags)
+    image_id = upsert_image(conn, path, tags)
 
     # return db image id
     return image_id
 
-def process_file(path):
+def process_file(conn, path, statinfo):
     hash = hasher.hash_file(path)
 
     mimetype = mime.from_file(path)
+
+    # upsert file
+    file_id = upsert_file(conn, path, statinfo, hash, mimetype)
+
     image_id = None
     if (mimetype.split('/'))[0] == 'image':
-        image_id = process_image_file(path, mimetype)
+        image_id = process_image_file(conn, path, mimetype)
     else:
         print(f'process_file({os.getpid()}): skipping file: {path} ({mimetype})')
 
-    # upsert file
-    file_id = upsert_file(path, hash, mimetype)
-
     # upsert image-file relation
     if not file_id is None and not image_id is None: 
-        upsert_image_file(file_id, image_id)
+        upsert_image_file(conn, file_id, image_id)
 
 def scan(workq, idle_worker_count):
     pid = os.getpid()
-    while True:
-        print(f'scan({pid}): fetching new item...')
 
-        with idle_worker_count.get_lock():
-            idle_worker_count.value += 1
+    error = None
+    try:
+        conn = psycopg2.connect(**connection_parameters)
 
-        item = workq.get()
+        while True:
+            print(f'scan({pid}): fetching new item...')
 
-        if item is None:
-            print(f'scan({pid}): found end-of-queue, quitting...')
-            break
+            item = workq.get()
 
-        with idle_worker_count.get_lock():
-            idle_worker_count.value -= 1
+            if item is None:
+                print(f'scan({pid}): found end-of-queue, quitting...')
+                break
 
-        print(f'scan({pid}): ITEM IS {item}')
-        printed_banner = False
-        try:
-            # assume item is a directory and try scanning it
-            for entry in os.scandir(item):
-                if not printed_banner:
-                    print(f'scan({pid}): scan: processing directory: {item}')
-                    printed_banner = True
+            with idle_worker_count.get_lock():
+                idle_worker_count.value -= 1
 
-                if entry.is_file(follow_symlinks=False):
-                    workq.put(entry.path)
-                elif entry.is_dir(follow_symlinks=False):
-                    workq.put(entry.path)
+            print(f'scan({pid}): ITEM IS {item}')
+            printed_banner = False
+            try:
+                # assume item is a directory and try scanning it
+                for entry in os.scandir(item):
+                    if not printed_banner:
+                        print(f'scan({pid}): scan: processing directory: {item}')
+                        printed_banner = True
+
+                    if entry.is_file(follow_symlinks=False):
+                        workq.put(entry.path)
+                    elif entry.is_dir(follow_symlinks=False):
+                        workq.put(entry.path)
+                    else:
+                        print(f'scan({pid}): scan: {entry.path} - not a file or dir, skipping...')
+            except NotADirectoryError:
+                # is current item a file?
+                statinfo = os.stat(item)
+                if stat.S_ISREG(statinfo.st_mode):
+                    process_file(conn, item, statinfo)
                 else:
-                    print(f'scan({pid}): scan: {entry.path} - not a file or dir, skipping...')
-        except NotADirectoryError:
-            # is current item a file?
-            if stat.S_ISREG(os.stat(item).st_mode):
-                process_file(item)
-            else:
-                workq.task_done()
-                raise Exception('unknown item type found in work queue')
+                    workq.task_done()
+                    with idle_worker_count.get_lock():
+                        idle_worker_count.value += 1
 
-        workq.task_done()
+                    raise InternalError('Internal error: unknown item type found in work queue')
+
+            workq.task_done()
+            with idle_worker_count.get_lock():
+                idle_worker_count.value += 1
+
+            print()
+
+        print()
+        print(f'scan({pid}): scan: at end of loop, workq is {workq.qsize()}, empty = {workq.empty()}')
         print()
 
-    print()
-    print(f'scan({pid}): scan: at end of loop, workq is {workq.qsize()}, empty = {workq.empty()}')
-    print()
+        workq.close()
 
-    workq.close()
+    except(psycopg2.DatabaseError) as error:
+        print(f'Database error: {error}')
+        conn.rollback()
+    except (psycopg2.Error) as error:
+        print(f'Error: {error}')
+        conn.rollback()
+    except Exception as error:
+        print(f'scan({pid}): here, error is {error}')
+        if (error):
+            print(f'scan({pid}): getting idle lock')
+            with idle_worker_count.get_lock():
+                idle_worker_count.value += 1
+            print(f'scan({pid}): idled and exiting...')
+            exit(1)
+    finally:
+        if(conn):
+            conn.close()
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
@@ -180,7 +394,7 @@ if __name__ == '__main__':
 
     # create the work queue
     workq = mp.JoinableQueue()
-    idle_worker_count = mp.Value('i', 0)
+    idle_worker_count = mp.Value('i', WORKER_COUNT)
 
     # prime the work queue with the list of target directories
     for path in sys.argv[1:]:

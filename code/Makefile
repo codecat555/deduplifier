@@ -45,7 +45,10 @@ DB_NAME=$(APP_NAME)
 DB_USER=postgres
 DB_PASSWORD=$(DB_USER)
 
-DB_HOST=127.0.0.1
+#DB_HOST=127.0.0.1
+# this will be evaluated late, at time-of-use, which should be in Makefile.post,
+# after HOST_VM_IP is set.
+DB_HOST=$(HOST_VM_IP)
 
 DB_EXTERNAL_PORT=6681
 DB_INSTANCE_PORT=3368
