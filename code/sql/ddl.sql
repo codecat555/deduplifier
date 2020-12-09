@@ -13,11 +13,11 @@ CREATE TABLE IF NOT EXISTS host (
     PRIMARY KEY(id)
 );
 
-CREATE TABLE IF NOT EXISTS drive (
-    id INTEGER GENERATED ALWAYS AS IDENTITY,
-    serialno VARCHAR(64) NOT NULL UNIQUE,
-    PRIMARY KEY(id)
-);
+--CREATE TABLE IF NOT EXISTS drive (
+--    id INTEGER GENERATED ALWAYS AS IDENTITY,
+--    serialno VARCHAR(64) NOT NULL UNIQUE,
+--    PRIMARY KEY(id)
+--);
 
 CREATE TABLE IF NOT EXISTS volume (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
@@ -49,15 +49,16 @@ INSERT INTO path OVERRIDING SYSTEM VALUE VALUES (0, NULL, '');
 CREATE TABLE IF NOT EXISTS location (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
     host_id INTEGER NOT NULL,
-    drive_id INTEGER NOT NULL,
+--    drive_id INTEGER NOT NULL,
     volume_id INTEGER NOT NULL,
     path_id INTEGER NOT NULL,
     PRIMARY KEY(id),
     CONSTRAINT fk_host FOREIGN KEY(host_id) REFERENCES host(id),
-    CONSTRAINT fk_drive FOREIGN KEY(drive_id) REFERENCES drive(id),
+--    CONSTRAINT fk_drive FOREIGN KEY(drive_id) REFERENCES drive(id),
     CONSTRAINT fk_volume FOREIGN KEY(volume_id) REFERENCES volume(id),
     CONSTRAINT fk_path FOREIGN KEY(path_id) REFERENCES path(id),
-    UNIQUE(host_id, drive_id, volume_id, path_id)
+--    UNIQUE(host_id, drive_id, volume_id, path_id)
+    UNIQUE(host_id, volume_id, path_id)
 );
 
 CREATE TABLE IF NOT EXISTS file (

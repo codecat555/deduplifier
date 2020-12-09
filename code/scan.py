@@ -32,12 +32,13 @@ from db_config import connection_parameters
 
 from filehash import FileHash
 
-if platform.system() == 'Windows':
-    import wmi
-    wmiobj = wmi.WMI()
+#if platform.system() == 'Windows':
+#    import wmi
+#    wmiobj = wmi.WMI()
 
 WORKER_COUNT = 1
 MAIN_LOOP_SLEEP_INTERVAL = 3
+MAX_IDLE_ITERATIONS=4
 QUEUE_DRAIN_SLEEP_INTERVAL = 1
 EXCLUDED_TAGS = [ 59932, 59933 ]
 
@@ -96,11 +97,13 @@ class InternalError(Exception):
 
 ################
 
-def upsert_image(conn, path, tags):
+def upsert_image(conn, path, file_id, tags):
     print(f'upsert_image({os.getpid()}): upserting with tags: {path}')
 
-    with conn.cursor() as cursor:
-        pass
+#    with conn.cursor() as cursor:
+#        cursor.execute("CALL add_image(%s)", tags)
+#
+#        #cursor.execute("CALL upsert_tags(%s)", tags)
 
     return 1
 
@@ -109,9 +112,7 @@ def get_drivename(path):
     if platform.system() == 'Linux':
         result = 1
     elif platform.system() == 'Windows':
-
-        assert(wmiobj is not None)
-
+        #assert(wmiobj is not None)
         #raise Exception("Windows support not implemented yet, can't get drive name")
         result = 1
     else:
@@ -185,7 +186,7 @@ def get_volname(path):
         #print(f'get_volname({os.getpid()}): raw output is {completed_process.stdout}')
         result = completed_process.stdout.strip('{}\n')
     else:
-        raise Exception(f"unsupported system ({platform.system()}), can't get drive name")
+        raise Exception(f"unsupported system ({platform.system()}), can't get volume name")
 
     print(f'get_volname({os.getpid()}): result is {result}')
     return result
@@ -198,7 +199,7 @@ def upsert_file(conn, path, statinfo, hash, mimetype):
     args = [
         agent_id,
         platform.node(),
-        get_drivename(path),
+        #get_drivename(path),
         get_volname(path),
         os.path.dirname(path),
         os.path.sep,
@@ -212,7 +213,14 @@ def upsert_file(conn, path, statinfo, hash, mimetype):
     ]
 
     with conn.cursor() as cursor:
-        pass
+        try:
+            cursor.callproc('add_file', *args)
+            result = cursor.fetchall()
+            print(f"add_file() result is {result}")
+            conn.commit()
+        except(Exception, psycopg2.DatabaseError) as error:
+            print(f'Error calling db: {error}')
+            conn.rollback()
 
     return 1
 
@@ -220,7 +228,7 @@ def upsert_image_file(conn, file_id, image_id):
     print(f'upsert_image_file({os.getpid()}): upserting image-file relation between image {image_id} and file {file_id}')
     pass
 
-def process_image_file(conn, path, mimetype):
+def process_image_file(conn, path, file_id, mimetype):
     print(f'process_image_file({os.getpid()}): processing image file: {path} ({mimetype})')
 
     # capture (and filter) the image tags, for upload
@@ -288,7 +296,7 @@ def process_image_file(conn, path, mimetype):
         print()
 
     # upsert image in db
-    image_id = upsert_image(conn, path, tags)
+    image_id = upsert_image(conn, path, file_id, tags)
 
     # return db image id
     return image_id
@@ -300,10 +308,12 @@ def process_file(conn, path, statinfo):
 
     # upsert file
     file_id = upsert_file(conn, path, statinfo, hash, mimetype)
+    print(f'process_file({os.getpid()}): upserted file: {file_id}')
+    return
 
     image_id = None
     if (mimetype.split('/'))[0] == 'image':
-        image_id = process_image_file(conn, path, mimetype)
+        image_id = process_image_file(conn, path, file_id, mimetype)
     else:
         print(f'process_file({os.getpid()}): skipping file: {path} ({mimetype})')
 
@@ -314,6 +324,7 @@ def process_file(conn, path, statinfo):
 def scan(workq, idle_worker_count):
     pid = os.getpid()
 
+    conn = None
     error = None
     try:
         conn = psycopg2.connect(**connection_parameters)
@@ -366,15 +377,14 @@ def scan(workq, idle_worker_count):
         print()
         print(f'scan({pid}): scan: at end of loop, workq is {workq.qsize()}, empty = {workq.empty()}')
         print()
-
-        workq.close()
-
     except(psycopg2.DatabaseError) as error:
         print(f'Database error: {error}')
-        conn.rollback()
+        if conn:
+            conn.rollback()
     except (psycopg2.Error) as error:
         print(f'Error: {error}')
-        conn.rollback()
+        if conn:
+            conn.rollback()
     except Exception as error:
         print(f'scan({pid}): here, error is {error}')
         if (error):
@@ -384,6 +394,7 @@ def scan(workq, idle_worker_count):
             print(f'scan({pid}): idled and exiting...')
             exit(1)
     finally:
+        workq.close()
         if(conn):
             conn.close()
 
@@ -404,28 +415,55 @@ if __name__ == '__main__':
     print(f'main({pid}): starting...')
 
     with mp.Pool(WORKER_COUNT, scan, (workq, idle_worker_count)) as pool:
+        time.sleep(2)
+
+        idle_iterations = 0
         while True:
             print(f'main({pid}): idle_worker_count is {idle_worker_count.value}, workq size is {workq.qsize()}')
-            if (idle_worker_count.value == WORKER_COUNT) and (workq.qsize() == 0):
-                # shut it down
+            if (idle_worker_count.value == WORKER_COUNT):
+                idle_iterations += 1
 
-                print(f'main({pid}): shutting down 0 (qsize is {workq.qsize()})...')
-                for i in range(WORKER_COUNT):
-                    workq.put(None)
+                print(f'main({pid}): all idle (qsize is {workq.qsize()}, idle iteration count is {idle_iterations})...')
+                if workq.qsize() == 0:
+                    # all idle and nothing left to do -> shut it down
+                    print(f'main({pid}): shutting down 0 (qsize is {workq.qsize()})...')
+                    for i in range(WORKER_COUNT):
+                        workq.put(None)
 
-                while workq.qsize() > 0:
+                    while workq.qsize() > 0:
+                        time.sleep(QUEUE_DRAIN_SLEEP_INTERVAL)
+
+                    print(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
+                    workq.close()
+
+                    print(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
+
+                    break
+                elif idle_iterations >= MAX_IDLE_ITERATIONS:
+                    # all idle and no progress -> shut it down
+                    print(f'main({pid}): shutting down 0 (qsize is {workq.qsize()})...')
+
+                    for i in range(WORKER_COUNT):
+                        workq.put(None)
+
                     time.sleep(QUEUE_DRAIN_SLEEP_INTERVAL)
 
-                print(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
-                workq.close()
+                    print(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
+                    workq.close()
 
-                print(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
-                break
+                    print(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
+
+                    break
             else:
+                idle_iterations = 0
+
                 print(f'main({pid}): sleeping...')
                 time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
 
         print(f'main({pid}): shutting down 3...')
+
+        if idle_iterations >= MAX_IDLE_ITERATIONS:
+            raise Exception('all idle and no progress, giving up')
 
     #scan(workq)
 

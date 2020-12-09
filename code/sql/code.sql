@@ -3,7 +3,7 @@ CREATE OR REPLACE FUNCTION
 add_file(
     agent text,
     hostname text,
-    drivename text,
+--    drivename text,
     volumename text,
     filepath text,
     sepchar text,
@@ -18,20 +18,20 @@ add_file(
 RETURNS integer LANGUAGE plpgsql AS $$
 DECLARE
     v_host_id INTEGER;
-    v_drive_id INTEGER;
+--    v_drive_id INTEGER;
     v_volume_id INTEGER;
     v_path_id INTEGER;
     v_location_id INTEGER;
     v_file_id INTEGER;
 BEGIN
     INSERT INTO host   VALUES(DEFAULT, hostname)   ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO v_host_id;
-    INSERT INTO drive  VALUES(DEFAULT, drivename)  ON CONFLICT (serialno) DO UPDATE SET serialno = EXCLUDED.serialno RETURNING id INTO v_drive_id;
+--    INSERT INTO drive  VALUES(DEFAULT, drivename)  ON CONFLICT (serialno) DO UPDATE SET serialno = EXCLUDED.serialno RETURNING id INTO v_drive_id;
     INSERT INTO volume VALUES(DEFAULT, volumename) ON CONFLICT (uuid) DO UPDATE SET uuid = EXCLUDED.uuid RETURNING id INTO v_volume_id;
 
     v_path_id := upsert_path(filepath, sepchar);
 
-    --INSERT INTO location VALUES(DEFAULT, v_host_id, v_drive_id, v_volume_id, v_path_id) RETURNING id INTO v_location_id;
-    INSERT INTO location VALUES(DEFAULT, v_host_id, v_drive_id, v_volume_id, v_path_id) ON CONFLICT (host_id, drive_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
+    --INSERT INTO location VALUES(DEFAULT, v_host_id, v_drive_id, v_volume_id, v_path_id) ON CONFLICT (host_id, drive_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
+    INSERT INTO location VALUES(DEFAULT, v_host_id, v_volume_id, v_path_id) ON CONFLICT (host_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
 
     INSERT INTO file VALUES(DEFAULT, v_location_id, filename, checksum, checksum_type, create_date, modify_date, access_date, discover_date) RETURNING id INTO v_file_id;
 
@@ -109,3 +109,35 @@ BEGIN
 END;
 $$;
 
+---- from https://stackoverflow.com/questions/7624919/check-if-a-user-defined-type-already-exists-in-postgresql
+--DO $$ BEGIN
+--    CREATE TYPE image_tags_data AS (
+--        image_tags_id integer,
+--        image_tags_file_id integer
+--    );
+--EXCEPTION
+--    WHEN duplicate_object THEN null;
+--END $$;
+--
+--CREATE OR REPLACE FUNCTION
+--add_image_tags(
+--    file_id integer,
+--    image_tagshash_fingerprint text
+--)
+--RETURNS RECORD LANGUAGE plpgsql AS $$
+--DECLARE
+--    image_tags_id INTEGER;
+--    image_tags_file_id INTEGER;
+--    retval image_tags_data;
+--BEGIN
+--    INSERT INTO image_tags VALUES(DEFAULT, image_tagshash_fingerprint) ON CONFLICT (name) DO UPDATE SET image_tagshash_fingerprint = EXCLUDED.image_tagshash_fingerprint RETURNING id INTO image_tags_id;
+--
+--    INSERT INTO image_tags_file VALUES(DEFAULT, file_id, image_tags_id) RETURNING id INTO image_tags_file_id;
+--
+--    retval.image_tags_id := image_tags_id;
+--    retval.image_tags_file_id := image_tags_file_id;
+--
+--    RETURN retval;
+--END;
+--$$;
+--
