@@ -1,6 +1,6 @@
 
 CREATE OR REPLACE FUNCTION
-add_file(
+upsert_file(
     agent text,
     hostname text,
 --    drivename text,
@@ -77,67 +77,71 @@ BEGIN
 END;
 $$;
 
--- from https://stackoverflow.com/questions/7624919/check-if-a-user-defined-type-already-exists-in-postgresql
-DO $$ BEGIN
-    CREATE TYPE image_data AS (
-        image_id integer,
-        image_file_id integer
-    );
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+---- from https://stackoverflow.com/questions/7624919/check-if-a-user-defined-type-already-exists-in-postgresql
+--DO $$ BEGIN
+--    CREATE TYPE image_data AS (
+--        image_id integer,
+--        image_file_id integer
+--    );
+--EXCEPTION
+--    WHEN duplicate_object THEN null;
+--END $$;
 
 CREATE OR REPLACE FUNCTION
-add_image(
+upsert_image(
     file_id integer,
     imagehash_fingerprint text
 )
 RETURNS RECORD LANGUAGE plpgsql AS $$
 DECLARE
     image_id INTEGER;
-    image_file_id INTEGER;
-    retval image_data;
 BEGIN
-    INSERT INTO image VALUES(DEFAULT, imagehash_fingerprint) ON CONFLICT (name) DO UPDATE SET imagehash_fingerprint = EXCLUDED.imagehash_fingerprint RETURNING id INTO image_id;
+    INSERT INTO image VALUES(DEFAULT, file_id, imagehash_fingerprint) ON CONFLICT (file_id) DO UPDATE SET file_id = EXCLUDED.file_id RETURNING id INTO image_id;
 
-    INSERT INTO image_file VALUES(DEFAULT, file_id, image_id) RETURNING id INTO image_file_id;
+    RETURN image_id;
+END;
+$$;
 
-    retval.image_id := image_id;
-    retval.image_file_id := image_file_id;
+---- from https://stackoverflow.com/questions/7624919/check-if-a-user-defined-type-already-exists-in-postgresql
+DO $$ BEGIN
+    CREATE TYPE image_tag_data AS (
+        tag_id integer,
+        image_tag_id integer
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE image_tag AS (
+        tag_name text,
+        tag_value text
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE OR REPLACE FUNCTION
+upsert_image_tags(
+    image_id integer,
+    tag_list image_tag[]
+)
+RETURNS image_tag_data[] LANGUAGE plpgsql AS $$
+DECLARE
+    tag_id INTEGER;
+    image_tag_id INTEGER;
+    retval image_tag_data[];
+BEGIN
+    FOR i IN 1 .. array_upper(tag_list, 1)
+    LOOP
+        INSERT INTO exif_tag VALUES(DEFAULT, tag_list[i].tag_name) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO tag_id;
+        
+        INSERT INTO image_tag VALUES(tag_id, image_id, tag_list[i].tag_value) ON CONFLICT (tag_id, image_id) DO UPDATE SET tag_id = EXCLUDED.tag_id RETURNING id INTO image_tag_id;
+
+        retval = array_append(retval, (tag_id, image_tag_id));
+    END LOOP;
 
     RETURN retval;
 END;
 $$;
 
----- from https://stackoverflow.com/questions/7624919/check-if-a-user-defined-type-already-exists-in-postgresql
---DO $$ BEGIN
---    CREATE TYPE image_tags_data AS (
---        image_tags_id integer,
---        image_tags_file_id integer
---    );
---EXCEPTION
---    WHEN duplicate_object THEN null;
---END $$;
---
---CREATE OR REPLACE FUNCTION
---add_image_tags(
---    file_id integer,
---    image_tagshash_fingerprint text
---)
---RETURNS RECORD LANGUAGE plpgsql AS $$
---DECLARE
---    image_tags_id INTEGER;
---    image_tags_file_id INTEGER;
---    retval image_tags_data;
---BEGIN
---    INSERT INTO image_tags VALUES(DEFAULT, image_tagshash_fingerprint) ON CONFLICT (name) DO UPDATE SET image_tagshash_fingerprint = EXCLUDED.image_tagshash_fingerprint RETURNING id INTO image_tags_id;
---
---    INSERT INTO image_tags_file VALUES(DEFAULT, file_id, image_tags_id) RETURNING id INTO image_tags_file_id;
---
---    retval.image_tags_id := image_tags_id;
---    retval.image_tags_file_id := image_tags_file_id;
---
---    RETURN retval;
---END;
---$$;
---

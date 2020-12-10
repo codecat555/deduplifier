@@ -76,32 +76,25 @@ CREATE TABLE IF NOT EXISTS file (
     UNIQUE(location_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS exif_tags (
+CREATE TABLE IF NOT EXISTS exif_tag (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name TEXT NOT NULL,
-);
-
-CREATE TABLE IF NOT EXISTS image_tags (
-    exif_tag_id INTEGER NOT NULL,
-    image_id INTEGER NOT NULL,
-    value TEXT NOT NULL,
-    CONSTRAINT fk_exif_tag FOREIGN KEY(exif_tag_id) REFERENCES exif_tag(id),
-    CONSTRAINT fk_image FOREIGN KEY(image_id) REFERENCES image(id)
-    UNIQUE(exif_tag_id, image_id)
+    name TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS image (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    --name VARCHAR(1024) NOT NULL,
-    imagehash_fingerprint VARCHAR(1024) UNIQUE
+    file_id INTEGER NOT NULL,
+    imagehash_fingerprint VARCHAR(1024) UNIQUE,
+    CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id)
 );
 
-CREATE TABLE IF NOT EXISTS image_file (
-    file_id INTEGER NOT NULL,
+CREATE TABLE IF NOT EXISTS image_tag (
+    exif_tag_id INTEGER NOT NULL,
     image_id INTEGER NOT NULL,
-    CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id),
+    value TEXT NOT NULL,
+    CONSTRAINT fk_exif_tag FOREIGN KEY(exif_tag_id) REFERENCES exif_tag(id),
     CONSTRAINT fk_image FOREIGN KEY(image_id) REFERENCES image(id),
-    UNIQUE(file_id, image_id)
+    UNIQUE(exif_tag_id, image_id)
 );
 
 -- describe tables, views and sequences

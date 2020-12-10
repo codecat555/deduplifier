@@ -40,7 +40,7 @@ WORKER_COUNT = 1
 MAIN_LOOP_SLEEP_INTERVAL = 3
 MAX_IDLE_ITERATIONS=4
 QUEUE_DRAIN_SLEEP_INTERVAL = 1
-EXCLUDED_TAGS = [ 59932, 59933 ]
+EXCLUDED_TAGS = [ 59932, 59933, 'UserComment', 'MakerNote', 'ComponentsConfiguration' ]
 
 mime = magic.Magic(mime=True)
 hash_type = 'sha256'
@@ -48,63 +48,62 @@ hasher = FileHash(hash_type)
 
 class InternalError(Exception):
     pass
-#    def __str__(self):
-#        return "Internal error: 
 
-################
+def upsert_image_tags(conn, path, file_id, tags):
+    print(f'upsert_image_tags({os.getpid()}): upserting with tags: {path}')
 
-#def add_file(*add_file_args):
-#    cursor = conn.cursor()
-#    try:
-#        cursor.callproc('add_file', *add_file_args)
-#        result = cursor.fetchall()
-#        print(f"add_file() result is {result}")
-#
-#        conn.commit()
-#    except(Exception, psycopg2.DatabaseError) as error:
-#        print(f'Error calling db: {error}')
-#        conn.rollback()
-#    finally:
-#        if(conn):
-#            cursor.close()
-#            conn.close()
-#
-#if __name__ == '__main__':
-#    try:
-#        conn = psycopg2.connect(**connection_parameters)
-#    except (Exception, psycopg2.Error) as e:
-#        print(f'Error connecting to db: {e}')
-#
-#    args = [
-#        'myagent',
-#        'myhost',
-#        'drivename',
-#        'volname',
-#        '/a/d/a/x',
-#        '/',
-#        'lola.jpg',
-#        'ff15659bad5d6090dccfaa0f4208a7d0a201fcda',
-#        'SHA1',
-#        '11/25/2020 2:15',
-#        '11/25/2020 2:15',
-#        '11/25/2020 2:15',
-#        '11/25/2020 2:15'
-#    ]
-#    if len(sys.argv) > 1:
-#        args = sys.argv[1:]
-#
-#    add_file(args)
+    agent_id = os.getpid()
 
-################
+    args = [
+        file_id,
+        [(key, str(value)) for key,value in tags.items()]
+    ]
+    print(f"upsert_image_tags() args:\n{args}")
+
+    result = None
+    with conn.cursor() as cursor:
+        try:
+            cursor.callproc('upsert_image_tags', args)
+            result = cursor.fetchall()
+            print(f"upsert_image_tags() result is {result}")
+            conn.commit()
+        except(Exception, psycopg2.DatabaseError) as error:
+            print(f'Error calling db: {error}')
+            conn.rollback()
+            raise
+
+    assert(len(result) == len(tags))
+    print(f"upsert_image_tags() result is {result}")
+    return zip(tags, result)
 
 def upsert_image(conn, path, file_id, tags):
     print(f'upsert_image({os.getpid()}): upserting with tags: {path}')
 
-#    with conn.cursor() as cursor:
-#        cursor.execute("CALL add_image(%s)", tags)
-#
-#        #cursor.execute("CALL upsert_tags(%s)", tags)
+    agent_id = os.getpid()
 
+    tag_ids = upsert_image_tags(conn, path, file_id, tags)
+
+#    args = [
+#        file_id,
+#        (tags,)
+#    ]
+#    print(f"upsert_image() args:\n{args}")
+#
+#    result = None
+#    with conn.cursor() as cursor:
+#        try:
+#            cursor.callproc('add_tags', args)
+#            result = cursor.fetchall()
+#            print(f"upsert_image() result is {result}")
+#            conn.commit()
+#        except(Exception, psycopg2.DatabaseError) as error:
+#            print(f'Error calling db: {error}')
+#            conn.rollback()
+#            raise
+#
+#    assert(len(result) == len(tags))
+#    print(f"upsert_image() result is {result}")
+#    return zip(tags, result)
     return 1
 
 def get_drivename(path):
@@ -122,7 +121,7 @@ def get_drivename(path):
     return result
 
 def get_volname(path):
-    print(f'get_volname({os.getpid()}): path is {path}')
+    #print(f'get_volname({os.getpid()}): path is {path}')
     if platform.system() == 'Linux':
         # see https://askubuntu.com/questions/1096813/how-to-get-uuid-partition-form-a-given-file-path-in-python
         completed_process = subprocess.run(
@@ -133,49 +132,6 @@ def get_volname(path):
         )
         result = completed_process.stdout.rstrip()
     elif platform.system() == 'Windows':
-## successful example
-##  >>> subprocess.run(["powershell", "-Command", r"(Get-Partition -DriveLetter ([System.IO.Path]::GetPathRoot('C:\Users\me\Pictures\2015-02-21\20150221_135026.jpg').Split(':')[0])).Guid" ], capture_output=True, text=True)
-##  CompletedProcess(args=['powershell', '-Command', "(Get-Partition -DriveLetter ([System.IO.Path]::GetPathRoot('C:\\Users\\me\\Pictures\\2015-02-21\\20150221_135026.jpg').Split(':')[0])).Guid"], returncode=0, stdout='{445e65f9-aabb-4531-b4b8-7745f786cd96}\n', stderr='')
-#
-#        completed_process = subprocess.run(["powershell", "-Command", r"(Get-Partition -DriveLetter ([System.IO.Path]::GetPathRoot('C:\Users\me\Pictures\2015-02-21\20150221_135026.jpg').Split(':')[0])).Guid" ], capture_output=True, text=True, check=True)
-#        
-#        completed_process = subprocess.run(
-#        [r'powershell.exe', r'-Command', r"(Get-Partition -DriveLetter ([System.IO.Path]::GetPathRoot('C:\Users\me\Pictures\2015-02-21\20150221_135026.jpg').Split(':')[0])).Guid"],
-#            check=True,
-#            text=True,
-#            capture_output=True
-#        )
-#
-#
-#  >>> path = r'C:\Users\me\Pictures\2015-02-21\20150221_135026.jpg'
-#  >>> command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{path}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
-#  >>> completed_process = subprocess.run(
-#  ...     [r'powershell.exe', r'-Command', command_string],
-#  ...     #check=True,
-#  ...     text=True,
-#  ...     capture_output=True
-#  ... )
-#  >>> print(completed_process.stdout)
-#  {445e65f9-aabb-4531-b4b8-7745f786cd96}
-#
-#
-#  >>> path = r'\\nuage\me\Documents\dev\deduplifier\code\testdata\2020-11-21\009.jpg'
-#  >>> command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{path}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
-#  >>> completed_process = None
-#  >>> completed_process = subprocess.run(
-#  ...     [r'powershell.exe', r'-Command', command_string],
-#  ...     #check=True,
-#  ...     text=True,
-#  ...     capture_output=True
-#  ... )
-#  >>> print(completed_process.stdout)
-#  {f51db7df-56af-4da4-801c-a9afdd3a8802}
-#  >>> print(completed_process.stdout.strip('{}\n'))
-#  f51db7df-56af-4da4-801c-a9afdd3a8802
-#  >>>
-#  >>>
-#
-#
         command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{path}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
         completed_process = subprocess.run(
             [r'powershell.exe', r'-Command', command_string],
@@ -188,7 +144,7 @@ def get_volname(path):
     else:
         raise Exception(f"unsupported system ({platform.system()}), can't get volume name")
 
-    print(f'get_volname({os.getpid()}): result is {result}')
+    #print(f'get_volname({os.getpid()}): result is {result}')
     return result
 
 def upsert_file(conn, path, statinfo, hash, mimetype):
@@ -197,7 +153,7 @@ def upsert_file(conn, path, statinfo, hash, mimetype):
     agent_id = os.getpid()
 
     args = [
-        agent_id,
+        str(agent_id),
         platform.node(),
         #get_drivename(path),
         get_volname(path),
@@ -211,27 +167,24 @@ def upsert_file(conn, path, statinfo, hash, mimetype):
         time.ctime(statinfo.st_atime),
         time.ctime()
     ]
+    print(f"upsert_file() args:\n{args}")
 
+    result = None
     with conn.cursor() as cursor:
         try:
-            cursor.callproc('add_file', *args)
-            result = cursor.fetchall()
-            print(f"add_file() result is {result}")
+            cursor.callproc('upsert_file', args)
+            result = cursor.fetchone()
+            print(f"upsert_file() result is {result}")
             conn.commit()
         except(Exception, psycopg2.DatabaseError) as error:
             print(f'Error calling db: {error}')
             conn.rollback()
+            raise
 
-    return 1
+    assert(len(result) == 1)
+    return result[0]
 
-def upsert_image_file(conn, file_id, image_id):
-    print(f'upsert_image_file({os.getpid()}): upserting image-file relation between image {image_id} and file {file_id}')
-    pass
-
-def process_image_file(conn, path, file_id, mimetype):
-    print(f'process_image_file({os.getpid()}): processing image file: {path} ({mimetype})')
-
-    # capture (and filter) the image tags, for upload
+def get_tags(path):
     tags = {}
     with Image.open(path) as image:
         exifdata = image.getexif()
@@ -241,7 +194,7 @@ def process_image_file(conn, path, file_id, mimetype):
             tag = TAGS.get(tag_id, tag_id)
 
             if tag_id in EXCLUDED_TAGS or tag in EXCLUDED_TAGS:
-                #print(f'process_image_file({os.getpid()}):   - excluding tag: {tag}')
+                #print(f'get_tags({os.getpid()}):   - excluding tag: {tag}')
                 continue
             assert tag != tag_id, f'unrecognized tag: {tag}'
 
@@ -251,20 +204,20 @@ def process_image_file(conn, path, file_id, mimetype):
             # see https://gist.github.com/erans/983821/e30bd051e1b1ae3cb07650f24184aa15c0037ce8
             if tag == 'GPSInfo':
 
-                #print(f'process_image_file({os.getpid()}):   - found GPSInfo tag')
+                #print(f'get_tags({os.getpid()}):   - found GPSInfo tag')
 
-                #print(f'process_image_file({os.getpid()}):   - processing GPSInfo data')
+                #print(f'get_tags({os.getpid()}):   - processing GPSInfo data')
 
                 for gps_tag_id, gps_value in enumerate(data):
                     gps_tag = GPSTAGS.get(gps_tag_id, gps_tag_id)
 
-                    #print(f'process_image_file({os.getpid()}):   - found GPSInfo tag: {gps_tag}, with value {gps_value}.')
+                    #print(f'get_tags({os.getpid()}):   - found GPSInfo tag: {gps_tag}, with value {gps_value}.')
 
                     if isinstance(gps_value, bytes):
-                        print(f'process_image_file({os.getpid()}):   - here 0')
+                        print(f'get_tags({os.getpid()}):   - here 0')
                         gps_value = gps_value.decode(errors='ignore')
                     elif isinstance(gps_value, str):
-                        print(f'process_image_file({os.getpid()}):   - here 1')
+                        print(f'get_tags({os.getpid()}):   - here 1')
                         # trim strings from first null code
                         try:
                             idx = gps_value.index('\x00')
@@ -275,7 +228,7 @@ def process_image_file(conn, path, file_id, mimetype):
                     assert(gps_tag not in tags)
                     tags[gps_tag] = gps_value
 
-                    print(f'process_image_file({os.getpid()}): {gps_tag}: {gps_value}')
+                    print(f'get_tags({os.getpid()}): {gps_tag}: {gps_value}')
             else:
                 if isinstance(data, bytes):
                     data = data.decode(errors='ignore')
@@ -289,11 +242,21 @@ def process_image_file(conn, path, file_id, mimetype):
 
                 #if tag != 'UserComment' and tag != 'ComponentsConfiguration':
                 if tag != 'UserComment' and tag != 'MakerNote':
-                    print(f'process_image_file({os.getpid()}): {tag}: {data}')
+                    print(f'get_tags({os.getpid()}): {tag}: {data} ({type(data)})')
 
-                assert(tag not in tags)
-                tags[tag] = data
+                # WIP - remove this if later, once all other tags seem to be working
+                if tag != 'UserComment' and tag != 'MakerNote':
+                    assert(tag not in tags)
+                    tags[tag] = data
+
         print()
+        return tags
+
+def process_image(conn, path, file_id, mimetype):
+    print(f'process_image({os.getpid()}): processing image file: {path} ({mimetype})')
+
+    # capture (and filter) the image tags, for upload
+    tags = get_tags(path)
 
     # upsert image in db
     image_id = upsert_image(conn, path, file_id, tags)
@@ -309,17 +272,12 @@ def process_file(conn, path, statinfo):
     # upsert file
     file_id = upsert_file(conn, path, statinfo, hash, mimetype)
     print(f'process_file({os.getpid()}): upserted file: {file_id}')
-    return
 
     image_id = None
     if (mimetype.split('/'))[0] == 'image':
-        image_id = process_image_file(conn, path, file_id, mimetype)
+        image_id = process_image(conn, path, file_id, mimetype)
     else:
         print(f'process_file({os.getpid()}): skipping file: {path} ({mimetype})')
-
-    # upsert image-file relation
-    if not file_id is None and not image_id is None: 
-        upsert_image_file(conn, file_id, image_id)
 
 def scan(workq, idle_worker_count):
     pid = os.getpid()
@@ -381,10 +339,12 @@ def scan(workq, idle_worker_count):
         print(f'Database error: {error}')
         if conn:
             conn.rollback()
+        raise
     except (psycopg2.Error) as error:
         print(f'Error: {error}')
         if conn:
             conn.rollback()
+        raise
     except Exception as error:
         print(f'scan({pid}): here, error is {error}')
         if (error):
