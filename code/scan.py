@@ -18,6 +18,10 @@ import subprocess
 
 import multiprocessing as mp
 
+import logging
+import logging.handlers
+import multiprocessing
+
 import magic
 
 # from package Pillow
@@ -37,10 +41,11 @@ from filehash import FileHash
 #    import wmi
 #    wmiobj = wmi.WMI()
 
-WORKER_COUNT = 1
 MAIN_LOOP_SLEEP_INTERVAL = 3
 MAX_IDLE_ITERATIONS=4
 QUEUE_DRAIN_SLEEP_INTERVAL = 1
+
+LOG_FORMAT='%(asctime)s %(levelname)s %(process)d %(message)s'
 
 # tag types for image metadata. would be nice if pillow handled the conversions rather than
 # just returning bytes values...other module seem to do so. maybe I missed something in the
@@ -49,7 +54,7 @@ EXCLUDED_TAGS = [ 59932, 59933, 'UserComment', 'MakerNote', ]
 INT_TAGS = [ 'SceneType', 'GPSAltitudeRef', 'GPSDifferential' ]
 TUPLE_TAGS = [ 'ComponentsConfiguration', 'GPSVersionID' ]
 
-debug = False
+worker_count = 0
 
 mime = magic.Magic(mime=True)
 hash_type = 'sha256'
@@ -59,7 +64,9 @@ class InternalError(Exception):
     pass
 
 def upsert_image_tags(conn, path, img_id, tags):
-    print(f'upsert_image_tags({os.getpid()}): upserting with tags: {path}')
+    logger = logging.getLogger()
+
+    logger.info(f'upsert_image_tags({os.getpid()}): upserting with tags: {path}')
 
     agent_id = os.getpid()
 
@@ -67,7 +74,7 @@ def upsert_image_tags(conn, path, img_id, tags):
         img_id,
         [(key, value) for key,value in tags.items()]
     ]
-    print(f"upsert_image_tags() args:\n{args}")
+    logger.info(f"upsert_image_tags() args:\n{args}")
 
     result = None
     with conn.cursor() as cursor:
@@ -79,10 +86,10 @@ def upsert_image_tags(conn, path, img_id, tags):
             sql = bytes(sql)
             cursor.execute(sql)
             result = cursor.fetchall()[0][0]
-            print(f"upsert_image_tags() result is {result}")
+            logger.info(f"upsert_image_tags() result is {result}")
             conn.commit()
         except(Exception, psycopg2.DatabaseError) as error:
-            print(f'Error calling db: {error}')
+            logger.info(f'Error calling db: {error}')
             conn.rollback()
             raise
 
@@ -90,7 +97,8 @@ def upsert_image_tags(conn, path, img_id, tags):
     return zip(tags, result)
 
 def upsert_image(conn, path, file_id, tags):
-    print(f'upsert_image({os.getpid()}): upserting with tags: {path}')
+    logger = logging.getLogger()
+    logger.info(f'upsert_image({os.getpid()}): upserting with tags: {path}')
 
     agent_id = os.getpid()
 
@@ -102,27 +110,28 @@ def upsert_image(conn, path, file_id, tags):
         file_id,
         imghash
     ]
-    print(f"upsert_image() args:\n{args}")
+    logger.info(f"upsert_image() args:\n{args}")
 
     img_id = None
     with conn.cursor() as cursor:
         try:
             cursor.callproc('upsert_image', args)
             img_id = cursor.fetchone()[0]
-            print(f"upsert_image() img_id is {img_id}")
+            logger.info(f"upsert_image() img_id is {img_id}")
             conn.commit()
         except(Exception, psycopg2.DatabaseError) as error:
-            print(f'Error calling db: {error}')
+            logger.info(f'Error calling db: {error}')
             conn.rollback()
             raise
 
     tag_ids = upsert_image_tags(conn, path, img_id, tags)
-    print(f"upsert_image() tag_ids are {tag_ids}")
+    logger.info(f"upsert_image() tag_ids are {tag_ids}")
 
     return 1
 
 def get_drivename(path):
-    print(f'get_drivename({os.getpid()}): path is {path}')
+    logger = logging.getLogger()
+    logger.info(f'get_drivename({os.getpid()}): path is {path}')
     if platform.system() == 'Linux':
         result = 1
     elif platform.system() == 'Windows':
@@ -132,11 +141,12 @@ def get_drivename(path):
     else:
         raise Exception(f"unsupported system ({platform.system()}), can't get drive name")
 
-    print(f'get_drivename({os.getpid()}): result is {result}')
+    logger.info(f'get_drivename({os.getpid()}): result is {result}')
     return result
 
 def get_volname(path):
-    #print(f'get_volname({os.getpid()}): path is {path}')
+    logger = logging.getLogger()
+    #logger.info(f'get_volname({os.getpid()}): path is {path}')
     if platform.system() == 'Linux':
         # see https://askubuntu.com/questions/1096813/how-to-get-uuid-partition-form-a-given-file-path-in-python
         completed_process = subprocess.run(
@@ -154,16 +164,17 @@ def get_volname(path):
             text=True,
             capture_output=True
         )
-        #print(f'get_volname({os.getpid()}): raw output is {completed_process.stdout}')
+        #logger.info(f'get_volname({os.getpid()}): raw output is {completed_process.stdout}')
         result = completed_process.stdout.strip('{}\n')
     else:
         raise Exception(f"unsupported system ({platform.system()}), can't get volume name")
 
-    #print(f'get_volname({os.getpid()}): result is {result}')
+    #logger.info(f'get_volname({os.getpid()}): result is {result}')
     return result
 
 def upsert_file(conn, path, statinfo, hash, mimetype):
-    print(f'upsert_file({os.getpid()}): upserting file with hash {hash} and type {mimetype} - {path}')
+    logger = logging.getLogger()
+    logger.info(f'upsert_file({os.getpid()}): upserting file with hash {hash} and type {mimetype} - {path}')
 
     agent_id = os.getpid()
 
@@ -182,23 +193,24 @@ def upsert_file(conn, path, statinfo, hash, mimetype):
         time.ctime(statinfo.st_atime),
         time.ctime()
     ]
-    print(f"upsert_file() args:\n{args}")
+    logger.info(f"upsert_file() args:\n{args}")
 
     result = None
     with conn.cursor() as cursor:
         try:
             cursor.callproc('upsert_file', args)
             result = cursor.fetchone()[0]
-            print(f"upsert_file() result is {result}")
+            logger.info(f"upsert_file() result is {result}")
             conn.commit()
         except(Exception, psycopg2.DatabaseError) as error:
-            print(f'Error calling db: {error}')
+            logger.info(f'Error calling db: {error}')
             conn.rollback()
             raise
 
     return result
 
 def get_tags(path):
+    logger = logging.getLogger()
     tags = {}
     with Image.open(path) as image:
         exifdata = image.getexif()
@@ -208,7 +220,7 @@ def get_tags(path):
             tag = TAGS.get(tag_id, tag_id)
 
             if tag_id in EXCLUDED_TAGS or tag in EXCLUDED_TAGS:
-                #print(f'get_tags({os.getpid()}):   - excluding tag: {tag}')
+                #logger.info(f'get_tags({os.getpid()}):   - excluding tag: {tag}')
                 continue
             assert tag != tag_id, f'unrecognized tag: {tag}'
 
@@ -219,14 +231,14 @@ def get_tags(path):
             # see https://sylvaindurand.org/gps-data-from-photos-with-python/
             if tag == 'GPSInfo':
 
-                #print(f'get_tags({os.getpid()}):   - found GPSInfo tag')
+                #logger.info(f'get_tags({os.getpid()}):   - found GPSInfo tag')
 
-                #print(f'get_tags({os.getpid()}):   - processing GPSInfo data')
+                #logger.info(f'get_tags({os.getpid()}):   - processing GPSInfo data')
 
                 for gps_tag_id, gps_value in data.items():
                     gps_tag = GPSTAGS.get(gps_tag_id, gps_tag_id)
 
-                    #print(f'get_tags({os.getpid()}):   - found GPSInfo tag: {gps_tag}, with value {gps_value}.')
+                    #logger.info(f'get_tags({os.getpid()}):   - found GPSInfo tag: {gps_tag}, with value {gps_value}.')
 
                     if isinstance(gps_value, IFDRational):
                         assert(gps_value.imag == 0)
@@ -247,14 +259,14 @@ def get_tags(path):
                     #    idx = gps_value.index('\x00')
                     #    before = gps_value
                     #    gps_value = gps_value[:idx]
-                    #    print(f'get_tags({os.getpid()}): HERE 1 - gps_tag is {gps_tag}, idx is {idx}, before is {before}, after is {gps_value}')
+                    #    logger.info(f'get_tags({os.getpid()}): HERE 1 - gps_tag is {gps_tag}, idx is {idx}, before is {before}, after is {gps_value}')
                     #except ValueError:
                     #    pass
 
                     assert(gps_tag not in tags)
                     tags[gps_tag] = gps_value
 
-                    print(f'get_tags({os.getpid()}): {gps_tag}: {gps_value}')
+                    logger.info(f'get_tags({os.getpid()}): {gps_tag}: {gps_value}')
             else:
                 if isinstance(data, IFDRational):
                     assert(data.imag == 0)
@@ -275,19 +287,20 @@ def get_tags(path):
                 #    idx = data.index('\x00')
                 #    before = data
                 #    data = data[:idx]
-                #    print(f'get_tags({os.getpid()}): HERE 0 - tag is {tag}, idx is {idx}, before is {before}, after is {data}')
+                #    logger.info(f'get_tags({os.getpid()}): HERE 0 - tag is {tag}, idx is {idx}, before is {before}, after is {data}')
                 #except ValueError:
                 #    pass
 
-                print(f'get_tags({os.getpid()}): {tag}: {data}')
+                logger.info(f'get_tags({os.getpid()}): {tag}: {data}')
                 assert(tag not in tags)
                 tags[tag] = data
 
-        print()
+        #logger.info()
         return tags
 
 def process_image(conn, path, file_id, mimetype):
-    print(f'process_image({os.getpid()}): processing image file: {path} ({mimetype})')
+    logger = logging.getLogger()
+    logger.info(f'process_image({os.getpid()}): processing image file: {path} ({mimetype})')
 
     # capture (and filter) the image tags, for upload
     tags = get_tags(path)
@@ -299,22 +312,31 @@ def process_image(conn, path, file_id, mimetype):
     return image_id
 
 def process_file(conn, path, statinfo):
+    logger = logging.getLogger()
     hash = hasher.hash_file(path)
 
     mimetype = mime.from_file(path)
 
     # upsert file
     file_id = upsert_file(conn, path, statinfo, hash, mimetype)
-    print(f'process_file({os.getpid()}): upserted file: {file_id}')
+    logger.info(f'process_file({os.getpid()}): upserted file: {file_id}')
 
     image_id = None
     if (mimetype.split('/'))[0] == 'image':
         image_id = process_image(conn, path, file_id, mimetype)
     else:
-        print(f'process_file({os.getpid()}): skipping file: {path} ({mimetype})')
+        logger.info(f'process_file({os.getpid()}): skipping file: {path} ({mimetype})')
 
-def scan(workq, idle_worker_count):
+def scan(workq, idle_worker_count, log_dir):
     pid = os.getpid()
+
+    log_file = os.path.join(log_dir, str(os.getpid()))
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.DEBUG,
+        format=LOG_FORMAT
+    )
+    logger = logging.getLogger()
 
     conn = None
     error = None
@@ -322,27 +344,27 @@ def scan(workq, idle_worker_count):
         conn = psycopg2.connect(**connection_parameters)
 
         while True:
-            if debug and workq.qsize() == 0:
-                print(f'scan({pid}): single-threaded and work queue is empty, quitting...')
+            if worker_count == 1 and workq.qsize() == 0:
+                logger.info(f'scan({pid}): single-threaded and work queue is empty, quitting...')
                 break
 
-            print(f'scan({pid}): fetching new item...')
+            logger.info(f'scan({pid}): fetching new item...')
             item = workq.get()
 
             if item is None:
-                print(f'scan({pid}): found end-of-queue, quitting...')
+                logger.info(f'scan({pid}): found end-of-queue, quitting...')
                 break
 
             with idle_worker_count.get_lock():
                 idle_worker_count.value -= 1
 
-            print(f'scan({pid}): ITEM IS {item}')
+            logger.info(f'scan({pid}): ITEM IS {item}')
             printed_banner = False
             try:
                 # assume item is a directory and try scanning it
                 for entry in os.scandir(item):
                     if not printed_banner:
-                        print(f'scan({pid}): scan: processing directory: {item}')
+                        logger.info(f'scan({pid}): scan: processing directory: {item}')
                         printed_banner = True
 
                     if entry.is_file(follow_symlinks=False):
@@ -350,7 +372,7 @@ def scan(workq, idle_worker_count):
                     elif entry.is_dir(follow_symlinks=False):
                         workq.put(entry.path)
                     else:
-                        print(f'scan({pid}): scan: {entry.path} - not a file or dir, skipping...')
+                        logger.info(f'scan({pid}): scan: {entry.path} - not a file or dir, skipping...')
             except NotADirectoryError:
                 # is current item a file?
                 statinfo = os.stat(item)
@@ -367,103 +389,134 @@ def scan(workq, idle_worker_count):
             with idle_worker_count.get_lock():
                 idle_worker_count.value += 1
 
-            print()
+            #logger.info()
 
-        print()
-        print(f'scan({pid}): scan: at end of loop, workq is {workq.qsize()}, empty = {workq.empty()}')
-        print()
+        #logger.info()
+        logger.info(f'scan({pid}): scan: at end of loop, workq is {workq.qsize()}, empty = {workq.empty()}')
+        #logger.info()
     except(psycopg2.DatabaseError) as error:
-        print(f'Database error: {error}')
+        logger.info(f'Database error: {error}')
         if conn:
             conn.rollback()
         raise
     except (psycopg2.Error) as error:
-        print(f'Error: {error}')
+        logger.info(f'Error: {error}')
         if conn:
             conn.rollback()
         raise
     except Exception as error:
-        print(f'scan({pid}): here, error is {error}')
+        logger.info(f'scan({pid}): here, error is {error}')
         if (error):
-            print(f'scan({pid}): getting idle lock')
+            logger.info(f'scan({pid}): getting idle lock')
             with idle_worker_count.get_lock():
                 idle_worker_count.value += 1
-            print(f'scan({pid}): idled and exiting...')
+            logger.info(f'scan({pid}): idled and exiting...')
             raise
     finally:
         workq.close()
         if(conn):
             conn.close()
 
+def usage(exit_code, errmsg=None):
+    if errmsg:
+        logger.info('Error: ' + errmsg, file=sys.stderr)
+    logger.info(f'usage: {sys.argv[0]} <worker-count> <target-directory>[,<target-directory>...]', file=sys.stderr)
+    exit(exit_code)
+
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print(f'usage: {sys.argv[0]} <target-directory>[,<target-directory>...]', file=sys.stderr)
-        exit(1)
+    if len(sys.argv) < 3:
+        usage(1)
+
+    try:
+        worker_count = int(sys.argv[1])
+    except ValueError as error:
+        usage(2, 'worker count must be a non-zero positive integer')
+
+    if worker_count < 1:
+        usage(3, 'worker count must be a non-zero positive integer')
 
     # create the work queue
     workq = mp.JoinableQueue()
-    idle_worker_count = mp.Value('i', WORKER_COUNT)
+    idle_worker_count = mp.Value('i', worker_count)
 
     # prime the work queue with the list of target directories
-    for path in sys.argv[1:]:
+    for path in sys.argv[2:]:
         workq.put(os.path.abspath(path))
 
-    pid = os.getpid()
-    print(f'main({pid}): starting...')
+    log_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0]))),
+        'log',
+        platform.node(),
+        time.strftime('%Y-%m-%d-%H-%M-%S'),
+        str(os.getpid())
+    )
+    os.makedirs(log_dir, mode=0o755)
 
-    if debug:
-        scan(workq, idle_worker_count)
+    pid = os.getpid()
+    #logger.info(f'main({pid}): starting...')
+
+    if worker_count == 1:
+        scan(workq, idle_worker_count, log_dir)
     else:
-        with mp.Pool(WORKER_COUNT, scan, (workq, idle_worker_count)) as pool:
+        with mp.Pool(worker_count, scan, (workq, idle_worker_count, log_dir)) as pool:
             time.sleep(2)
+
+            # configure parent logging
+            log_file = os.path.join(log_dir, str(os.getpid()))
+            logging.basicConfig(
+                filename=log_file,
+                level=logging.DEBUG,
+                format=LOG_FORMAT
+            )
+            logger = logging.getLogger()
 
             idle_iterations = 0
             while True:
-                print(f'main({pid}): idle_worker_count is {idle_worker_count.value}, workq size is {workq.qsize()}')
-                if (idle_worker_count.value == WORKER_COUNT):
+                logger.info(f'main({pid}): idle_worker_count is {idle_worker_count.value}, workq size is {workq.qsize()}')
+                if (idle_worker_count.value == worker_count):
                     idle_iterations += 1
 
-                    print(f'main({pid}): all idle (qsize is {workq.qsize()}, idle iteration count is {idle_iterations})...')
+                    logger.info(f'main({pid}): all idle (qsize is {workq.qsize()}, idle iteration count is {idle_iterations})...')
                     if workq.qsize() == 0:
                         # all idle and nothing left to do -> shut it down
-                        print(f'main({pid}): shutting down 0 (qsize is {workq.qsize()})...')
-                        for i in range(WORKER_COUNT):
+                        logger.info(f'main({pid}): shutting down 0 (qsize is {workq.qsize()})...')
+                        for i in range(worker_count):
                             workq.put(None)
 
                         while workq.qsize() > 0:
                             time.sleep(QUEUE_DRAIN_SLEEP_INTERVAL)
 
-                        print(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
+                        logger.info(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
                         workq.close()
 
-                        print(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
+                        logger.info(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
 
                         break
                     elif idle_iterations >= MAX_IDLE_ITERATIONS:
                         # all idle and no progress -> shut it down
-                        print(f'main({pid}): shutting down 0 (qsize is {workq.qsize()})...')
+                        logger.info(f'main({pid}): shutting down 0 (qsize is {workq.qsize()})...')
 
-                        for i in range(WORKER_COUNT):
+                        for i in range(worker_count):
                             workq.put(None)
 
                         time.sleep(QUEUE_DRAIN_SLEEP_INTERVAL)
 
-                        print(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
+                        logger.info(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
                         workq.close()
 
-                        print(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
+                        logger.info(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
 
                         break
                 else:
                     idle_iterations = 0
 
-                    print(f'main({pid}): sleeping...')
+                    logger.info(f'main({pid}): sleeping...')
                     time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
 
-            print(f'main({pid}): shutting down 3...')
+            logger.info(f'main({pid}): shutting down 3...')
 
             if idle_iterations >= MAX_IDLE_ITERATIONS:
                 raise Exception('all idle and no progress, giving up')
 
-    print(f'main({pid}): all done.')
+    logger.info(f'main({pid}): all done.')
 
