@@ -78,14 +78,16 @@ CREATE TABLE IF NOT EXISTS file (
 
 CREATE TABLE IF NOT EXISTS exif_tag (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name TEXT NOT NULL
+    name TEXT NOT NULL UNIQUE
 );
 
 CREATE TABLE IF NOT EXISTS image (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     file_id INTEGER NOT NULL,
-    imagehash_fingerprint VARCHAR(1024) UNIQUE,
-    CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id)
+    --imagehash_fingerprint VARCHAR(1024) UNIQUE,
+    CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id),
+    --UNIQUE(file_id, imagehash_fingerprint)
+    UNIQUE(file_id)
 );
 
 CREATE TABLE IF NOT EXISTS image_tag (

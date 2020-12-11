@@ -33,7 +33,7 @@ BEGIN
     --INSERT INTO location VALUES(DEFAULT, v_host_id, v_drive_id, v_volume_id, v_path_id) ON CONFLICT (host_id, drive_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
     INSERT INTO location VALUES(DEFAULT, v_host_id, v_volume_id, v_path_id) ON CONFLICT (host_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
 
-    INSERT INTO file VALUES(DEFAULT, v_location_id, filename, checksum, checksum_type, create_date, modify_date, access_date, discover_date) RETURNING id INTO v_file_id;
+    INSERT INTO file VALUES(DEFAULT, v_location_id, filename, checksum, checksum_type, create_date, modify_date, access_date, discover_date) ON CONFLICT (location_id, name) DO UPDATE SET location_id = EXCLUDED.location_id RETURNING id INTO v_file_id;
 
     RETURN v_file_id;
 END;
@@ -89,31 +89,23 @@ $$;
 
 CREATE OR REPLACE FUNCTION
 upsert_image(
-    file_id integer,
-    imagehash_fingerprint text
+    file_id_in integer,
+    imghash_in text
 )
-RETURNS RECORD LANGUAGE plpgsql AS $$
+RETURNS INTEGER LANGUAGE plpgsql AS $$
 DECLARE
-    image_id INTEGER;
+    img_id INTEGER;
 BEGIN
-    INSERT INTO image VALUES(DEFAULT, file_id, imagehash_fingerprint) ON CONFLICT (file_id) DO UPDATE SET file_id = EXCLUDED.file_id RETURNING id INTO image_id;
+    --INSERT INTO image VALUES(DEFAULT, file_id_in, imghash_in) ON CONFLICT (file_id, imagehash_fingerprint) DO UPDATE SET file_id = EXCLUDED.file_id RETURNING id INTO img_id;
+    INSERT INTO image VALUES(DEFAULT, file_id_in) ON CONFLICT (file_id) DO UPDATE SET file_id = EXCLUDED.file_id RETURNING id INTO img_id;
 
-    RETURN image_id;
+    RETURN img_id;
 END;
 $$;
 
 ---- from https://stackoverflow.com/questions/7624919/check-if-a-user-defined-type-already-exists-in-postgresql
 DO $$ BEGIN
-    CREATE TYPE image_tag_data AS (
-        tag_id integer,
-        image_tag_id integer
-    );
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
-
-DO $$ BEGIN
-    CREATE TYPE image_tag AS (
+    CREATE TYPE image_tag_type AS (
         tag_name text,
         tag_value text
     );
@@ -123,22 +115,21 @@ END $$;
 
 CREATE OR REPLACE FUNCTION
 upsert_image_tags(
-    image_id integer,
-    tag_list image_tag[]
+    img_id INTEGER,
+    tag_list image_tag_type[]
 )
-RETURNS image_tag_data[] LANGUAGE plpgsql AS $$
+RETURNS INTEGER[] LANGUAGE plpgsql AS $$
 DECLARE
     tag_id INTEGER;
-    image_tag_id INTEGER;
-    retval image_tag_data[];
+    retval INTEGER[];
 BEGIN
     FOR i IN 1 .. array_upper(tag_list, 1)
     LOOP
         INSERT INTO exif_tag VALUES(DEFAULT, tag_list[i].tag_name) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO tag_id;
         
-        INSERT INTO image_tag VALUES(tag_id, image_id, tag_list[i].tag_value) ON CONFLICT (tag_id, image_id) DO UPDATE SET tag_id = EXCLUDED.tag_id RETURNING id INTO image_tag_id;
+        INSERT INTO image_tag VALUES(tag_id, img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET exif_tag_id = EXCLUDED.exif_tag_id;
 
-        retval = array_append(retval, (tag_id, image_tag_id));
+        retval = array_append(retval, tag_id);
     END LOOP;
 
     RETURN retval;
