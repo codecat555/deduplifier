@@ -1,19 +1,22 @@
 
 CREATE OR REPLACE FUNCTION
 upsert_file(
-    agent text,
-    hostname text,
---    drivename text,
-    volumename text,
-    filepath text,
-    sepchar text,
-    filename text,
-    checksum text,
-    checksum_type text,
-    create_date timestamp with time zone,
-    modify_date timestamp with time zone,
-    access_date timestamp with time zone,
-    discover_date timestamp with time zone
+    agent_in text,
+    hostname_in text,
+--    drivename_in text,
+    volumename_in text,
+    filepath_in text,
+    sepchar_in text,
+    filename_in text,
+    mime_type_in text,
+    mime_subtype_in text,
+    size_in_bytes_in integer,
+    checksum_in text,
+    checksum_type_in text,
+    create_date_in timestamp with time zone,
+    modify_date_in timestamp with time zone,
+    access_date_in timestamp with time zone,
+    discover_date_in timestamp with time zone
 )
 RETURNS integer LANGUAGE plpgsql AS $$
 DECLARE
@@ -24,16 +27,16 @@ DECLARE
     v_location_id INTEGER;
     v_file_id INTEGER;
 BEGIN
-    INSERT INTO host   VALUES(DEFAULT, hostname)   ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO v_host_id;
---    INSERT INTO drive  VALUES(DEFAULT, drivename)  ON CONFLICT (serialno) DO UPDATE SET serialno = EXCLUDED.serialno RETURNING id INTO v_drive_id;
-    INSERT INTO volume VALUES(DEFAULT, volumename) ON CONFLICT (uuid) DO UPDATE SET uuid = EXCLUDED.uuid RETURNING id INTO v_volume_id;
+    INSERT INTO host VALUES(DEFAULT, hostname_in) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO v_host_id;
+--    INSERT INTO drive  VALUES(DEFAULT, drivename_in)  ON CONFLICT (serialno) DO UPDATE SET serialno = EXCLUDED.serialno RETURNING id INTO v_drive_id;
+    INSERT INTO volume VALUES(DEFAULT, volumename_in) ON CONFLICT (uuid) DO UPDATE SET uuid = EXCLUDED.uuid RETURNING id INTO v_volume_id;
 
-    v_path_id := upsert_path(filepath, sepchar);
+    v_path_id := upsert_path(filepath_in, sepchar_in);
 
     --INSERT INTO location VALUES(DEFAULT, v_host_id, v_drive_id, v_volume_id, v_path_id) ON CONFLICT (host_id, drive_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
     INSERT INTO location VALUES(DEFAULT, v_host_id, v_volume_id, v_path_id) ON CONFLICT (host_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
 
-    INSERT INTO file VALUES(DEFAULT, v_location_id, filename, checksum, checksum_type, create_date, modify_date, access_date, discover_date) ON CONFLICT (location_id, name) DO UPDATE SET location_id = EXCLUDED.location_id RETURNING id INTO v_file_id;
+    INSERT INTO file VALUES(DEFAULT, v_location_id, filename_in, mime_type_in, mime_subtype_in, size_in_bytes_in, checksum_in, checksum_type_in, create_date_in, modify_date_in, access_date_in, discover_date_in) ON CONFLICT (location_id, name) DO UPDATE SET location_id = EXCLUDED.location_id RETURNING id INTO v_file_id;
 
     RETURN v_file_id;
 END;
@@ -123,14 +126,16 @@ DECLARE
     tag_id INTEGER;
     retval INTEGER[];
 BEGIN
-    FOR i IN 1 .. array_upper(tag_list, 1)
-    LOOP
-        INSERT INTO exif_tag VALUES(DEFAULT, tag_list[i].tag_name) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO tag_id;
-        
-        INSERT INTO image_tag VALUES(tag_id, img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET exif_tag_id = EXCLUDED.exif_tag_id;
+    IF array_length(tag_list, 1) > 0 THEN
+        FOR i IN 1 .. array_upper(tag_list, 1)
+        LOOP
+            INSERT INTO exif_tag VALUES(DEFAULT, tag_list[i].tag_name) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO tag_id;
+            
+            INSERT INTO image_tag VALUES(tag_id, img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET exif_tag_id = EXCLUDED.exif_tag_id;
 
-        retval = array_append(retval, tag_id);
-    END LOOP;
+            retval = array_append(retval, tag_id);
+        END LOOP;
+    END IF;
 
     RETURN retval;
 END;

@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS host (
 
 CREATE TABLE IF NOT EXISTS volume (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
-    uuid VARCHAR(40) NOT NULL UNIQUE,
+    uuid text NOT NULL UNIQUE,
     PRIMARY KEY(id)
 );
 
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS volume (
 CREATE TABLE IF NOT EXISTS path (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
     parent_path_id INTEGER REFERENCES path,
-    name VARCHAR(40) NOT NULL,
+    name text NOT NULL,
     PRIMARY KEY(id),
     UNIQUE(parent_path_id, name)
 );
@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS file (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
     location_id INTEGER NOT NULL,
     name VARCHAR(1024) NOT NULL,
+    mime_type TEXT,
+    mime_subtype TEXT,
+    size_in_bytes INTEGER,
     checksum TEXT,
     checksum_type TEXT,
     create_date DATE NOT NULL,
