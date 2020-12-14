@@ -3,12 +3,16 @@ services:
   web:
     working_dir: ___CODE_PATH___
     restart: always
+    environment:
+      - TZ=___TIMEZONE___
     build:
         context: .
         dockerfile: web-Dockerfile
     volumes:
       #- .:___CODE_PATH___
       - ..:___APP_PATH___
+      - "/etc/localtime:/etc/localtime:ro"
+      - "/etc/timezone:/etc/timezone:ro"
     ports:
       - ___WEB_EXTERNAL_PORT___:___WEB_INSTANCE_PORT___
     depends_on:
@@ -24,7 +28,11 @@ services:
     build:
         context: .
         dockerfile: db-Dockerfile
+    volumes:
+      - "/etc/localtime:/etc/localtime:ro"
+      - "/etc/timezone:/etc/timezone:ro"
     environment:
+      - TZ=___TIMEZONE___
       - PGDATA=___DB_PATH___
       - PGPORT=___DB_INSTANCE_PORT___
       - POSTGRES_DB=___DB_NAME___

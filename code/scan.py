@@ -22,6 +22,8 @@ import logging
 import logging.handlers
 import multiprocessing
 
+import re
+
 import magic
 
 # from package Pillow
@@ -37,6 +39,8 @@ from db_config import connection_parameters
 #import imagehash
 
 from filehash import FileHash
+
+import shlex
 
 #if platform.system() == 'Windows':
 #    import wmi
@@ -60,6 +64,11 @@ EXCLUDED_TAGS = [ 59932, 59933, 'UserComment', 'MakerNote', ]
 INT_TAGS = [ 'GPSAltitudeRef', 'GPSDifferential' ]
 TUPLE_TAGS = [ 'ComponentsConfiguration', 'GPSVersionID' ]
 
+EXCLUDE_PATTERNS = [ '^NTUSER.DAT' ]
+EXCLUDE_REGEX = []
+for p in EXCLUDE_PATTERNS:
+    EXCLUDE_REGEX.append(re.compile(p))
+
 worker_count = 0
 
 mime = magic.Magic(mime=True)
@@ -71,16 +80,25 @@ logger = None
 class InternalError(Exception):
     pass
 
+class ExcludedFile(Exception):
+    pass
+
 # from https://stackoverflow.com/questions/6234405/logging-uncaught-exceptions-in-python
 def exception_handler(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
 
-    logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+    logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+def excluded(string):
+    for pat in EXCLUDE_REGEX:
+        if pat.match(string):
+            return True
+    return False
 
 def upsert_image_tags(conn, path, img_id, tags):
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
 
     logger.info(f'upsert_image_tags({os.getpid()}): upserting image tags: {path}')
 
@@ -107,7 +125,7 @@ def upsert_image_tags(conn, path, img_id, tags):
             result = cursor.fetchall()[0][0]
             #logger.debug(f"upsert_image_tags() result is {result}")
             conn.commit()
-        except(Exception, psycopg2.DatabaseError) as error:
+        except Exception as error:
             logger.info(f'Error calling db: {error}')
             conn.rollback()
             raise
@@ -116,7 +134,7 @@ def upsert_image_tags(conn, path, img_id, tags):
     return zip(tags, result)
 
 def upsert_image(conn, path, file_id, tags):
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
     logger.info(f'upsert_image({os.getpid()}): upserting image: {path}')
 
     agent_id = os.getpid()
@@ -138,7 +156,7 @@ def upsert_image(conn, path, file_id, tags):
             img_id = cursor.fetchone()[0]
             logger.info(f"upsert_image() img_id is {img_id}")
             conn.commit()
-        except(Exception, psycopg2.DatabaseError) as error:
+        except Exception as error:
             logger.info(f'Error calling db: {error}')
             conn.rollback()
             raise
@@ -150,7 +168,7 @@ def upsert_image(conn, path, file_id, tags):
     return 1
 
 def get_drivename(path):
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
     logger.info(f'get_drivename({os.getpid()}): path is {path}')
     if platform.system() == 'Linux':
         result = 1
@@ -165,19 +183,19 @@ def get_drivename(path):
     return result
 
 def get_volname(path):
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
     #logger.info(f'get_volname({os.getpid()}): path is {path}')
     if platform.system() == 'Linux':
         # see https://askubuntu.com/questions/1096813/how-to-get-uuid-partition-form-a-given-file-path-in-python
         completed_process = subprocess.run(
-            ['/usr/bin/bash', '-c', f'/usr/sbin/blkid -o value $(/usr/bin/df --output=source {path} | tail -1) | head -1'],
+            ['/usr/bin/bash', '-c', f'/usr/sbin/blkid -o value $(/usr/bin/df --output=source {shlex.quote(path)} | tail -1) | head -1'],
             check=True,
             text=True,
             capture_output=True
         )
         result = completed_process.stdout.rstrip()
     elif platform.system() == 'Windows':
-        command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{path}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
+        command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{shlex.quote(path)}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
         completed_process = subprocess.run(
             [r'powershell.exe', r'-Command', command_string],
             check=True,
@@ -193,7 +211,7 @@ def get_volname(path):
     return result
 
 def upsert_file(conn, path, statinfo, hash, mimetype):
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
     logger.info(f'upsert_file({os.getpid()}): upserting file with hash {hash} and type {mimetype} - {path}')
 
     agent_id = os.getpid()
@@ -227,123 +245,125 @@ def upsert_file(conn, path, statinfo, hash, mimetype):
             result = cursor.fetchone()[0]
             logger.info(f"upsert_file() result is {result}")
             conn.commit()
-        except(Exception, psycopg2.DatabaseError) as error:
+        except Exception as error:
             logger.info(f'Error calling db: {error}')
             conn.rollback()
             raise
 
     return result
 
-def get_tags(path):
-    logger = logging.getLogger()
+def get_tags(path, image):
+    logger = logging.getLogger(__name__)
     logger.debug(f'get_tags({os.getpid()}): starting...')
     tags = {}
-    try:
-        with Image.open(path) as image:
-            exifdata = image.getexif()
+    exifdata = image.getexif()
 
-            # now, handle the rest
-            for tag_id in exifdata:
-                tag = TAGS.get(tag_id, tag_id)
+    # now, handle the rest
+    for tag_id in exifdata:
+        tag = TAGS.get(tag_id, tag_id)
+        if tag == tag_id:
+            logger.warning(f'unrecognized tag: {tag}')
 
-                if tag_id in EXCLUDED_TAGS or tag in EXCLUDED_TAGS:
-                    logger.info(f'get_tags({os.getpid()}):   - excluding tag: {tag}')
-                    continue
-                assert tag != tag_id, f'unrecognized tag: {tag}'
+        if tag_id in EXCLUDED_TAGS or tag in EXCLUDED_TAGS:
+            logger.info(f'get_tags({os.getpid()}):   - excluding tag: {tag}')
+            continue
 
-                data = exifdata.get(tag_id)
+        data = exifdata.get(tag_id)
 
-                # handle gps data
-                # see https://gist.github.com/erans/983821/e30bd051e1b1ae3cb07650f24184aa15c0037ce8
-                # see https://sylvaindurand.org/gps-data-from-photos-with-python/
-                if tag == 'GPSInfo':
+        # handle gps data
+        # see https://gist.github.com/erans/983821/e30bd051e1b1ae3cb07650f24184aa15c0037ce8
+        # see https://sylvaindurand.org/gps-data-from-photos-with-python/
+        if tag == 'GPSInfo':
 
-                    logger.info(f'get_tags({os.getpid()}):   - found GPSInfo tag')
+            logger.info(f'get_tags({os.getpid()}):   - found GPSInfo tag')
 
-                    logger.info(f'get_tags({os.getpid()}):   - processing GPSInfo data')
+            logger.info(f'get_tags({os.getpid()}):   - processing GPSInfo data')
 
-                    for gps_tag_id, gps_value in data.items():
-                        gps_tag = GPSTAGS.get(gps_tag_id, gps_tag_id)
+            for gps_tag_id, gps_value in data.items():
+                gps_tag = GPSTAGS.get(gps_tag_id, gps_tag_id)
 
-                        logger.info(f'get_tags({os.getpid()}):   - found GPSInfo tag: {gps_tag}, with value {gps_value}.')
+                logger.info(f'get_tags({os.getpid()}):   - found GPSInfo tag: {gps_tag}, with value {gps_value}.')
 
-                        if isinstance(gps_value, IFDRational):
-                            assert(gps_value.imag == 0)
-                            gps_value = gps_value.real
-                        elif gps_tag in TUPLE_TAGS:
-                            ba = bytearray(gps_value)
-                            gps_value = tuple(ba)
-                        elif gps_tag in INT_TAGS:
-                            gps_value = int.from_bytes(gps_value, sys.byteorder)
-                        elif isinstance(gps_value, bytes):
-                            gps_value = gps_value.decode()
+                if isinstance(gps_value, IFDRational):
+                    assert(gps_value.imag == 0)
+                    gps_value = gps_value.real
+                elif gps_tag in TUPLE_TAGS:
+                    ba = bytearray(gps_value)
+                    gps_value = tuple(ba)
+                elif gps_tag in INT_TAGS:
+                    gps_value = int.from_bytes(gps_value, sys.byteorder)
+                elif isinstance(gps_value, bytes):
+                    gps_value = gps_value.decode()
 
-                        if not isinstance(gps_value, str):
-                            gps_value = str(gps_value)
+                if not isinstance(gps_value, str):
+                    gps_value = str(gps_value)
 
-                        # trim strings from first null code
-                        try:
-                            idx = gps_value.index('\x00')
-                            before = gps_value
-                            gps_value = gps_value[:idx]
-                            logger.debug(f'get_tags({os.getpid()}): HERE 1 - gps_tag is {gps_tag}, idx is {idx}, before is {before}, after is {gps_value}')
-                        except ValueError:
-                            pass
+                # trim strings from first null code
+                try:
+                    idx = gps_value.index('\x00')
+                    before = gps_value
+                    gps_value = gps_value[:idx]
+                    logger.debug(f'get_tags({os.getpid()}): HERE 1 - gps_tag is {gps_tag}, idx is {idx}, before is {before}, after is {gps_value}')
+                except ValueError:
+                    pass
 
-                        assert(gps_tag not in tags)
-                        tags[gps_tag] = gps_value
+                assert(gps_tag not in tags)
+                tags[gps_tag] = gps_value
 
-                        logger.info(f'get_tags({os.getpid()}): {gps_tag}: {gps_value}')
-                else:
-                    if isinstance(data, IFDRational):
-                        assert(data.imag == 0)
-                        data = data.real
-                    elif tag in TUPLE_TAGS:
-                        ba = bytearray(data)
-                        data = tuple(ba)
-                    elif tag in INT_TAGS:
-                        data = int.from_bytes(data, sys.byteorder)
-                    elif isinstance(data, bytes):
-                        data = data.decode()
+                logger.info(f'get_tags({os.getpid()}): {gps_tag}: {gps_value}')
+        else:
+            if isinstance(data, IFDRational):
+                assert(data.imag == 0)
+                data = data.real
+            elif tag in TUPLE_TAGS:
+                ba = bytearray(data)
+                data = tuple(ba)
+            elif tag in INT_TAGS:
+                data = int.from_bytes(data, sys.byteorder)
+            elif isinstance(data, bytes):
+                data = data.decode()
 
-                    if not isinstance(data, str):
-                        data = str(data)
+            if not isinstance(data, str):
+                data = str(data)
 
-                    # trim strings from first null value
-                    try:
-                        idx = data.index('\x00')
-                        before = data
-                        data = data[:idx]
-                        logger.debug(f'get_tags({os.getpid()}): HERE 0 - tag is {tag}, idx is {idx}, before is {before}, after is {data}')
-                    except ValueError:
-                        pass
+            # trim strings from first null value
+            try:
+                idx = data.index('\x00')
+                before = data
+                data = data[:idx]
+                logger.debug(f'get_tags({os.getpid()}): HERE 0 - tag is {tag}, idx is {idx}, before is {before}, after is {data}')
+            except ValueError:
+                pass
 
-                    logger.info(f'get_tags({os.getpid()}): {tag}: {data}')
-                    assert(tag not in tags)
-                    tags[tag] = data
-
-    except PIL.Image.DecompressionBombError as error:
-        logger.warning(f'get_tags({os.getpid()}): failed to open image file, skipping...')
+            logger.info(f'get_tags({os.getpid()}): {tag}: {data}')
+            assert(tag not in tags)
+            tags[tag] = data
 
     logger.debug(f'get_tags({os.getpid()}): done.')
 
     return tags
 
 def process_image(conn, path, file_id, mimetype):
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
     logger.info(f'process_image({os.getpid()}): processing image file: {path} ({mimetype})')
 
-    # capture (and filter) the image tags, for upload
-    tags = get_tags(path)
-
-    # upsert image in db
-    image_id = upsert_image(conn, path, file_id, tags)
+    image_id = None
+    try:
+        with Image.open(path) as image:
+            # capture (and filter) the image tags, for upload
+            tags = get_tags(path, image)
+    except Exception as error:
+        logger.warning(f'get_tags({os.getpid()}): failed to open image file, skipping...')
+        logger.exception(error)
+    else:
+        # upsert image in db
+        image_id = upsert_image(conn, path, file_id, tags)
 
     # return db image id
     return image_id
 
 def process_file(conn, path, statinfo):
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
 
     file_size = statinfo.st_size
     if file_size > FILE_SIZE_THRESHOLD:
@@ -365,8 +385,8 @@ def process_file(conn, path, statinfo):
     image_id = None
     if (mimetype.split('/'))[0] == 'image':
         image_id = process_image(conn, path, file_id, mimetype)
-    else:
-        logger.info(f'process_file({os.getpid()}): skipping file: {path} ({mimetype})')
+    #else:
+    #    logger.info(f'process_file({os.getpid()}): skipping file: {path} ({mimetype})')
 
 def scan(workq, idle_worker_count, log_dir):
     pid = os.getpid()
@@ -377,7 +397,7 @@ def scan(workq, idle_worker_count, log_dir):
         level=logging.DEBUG,
         format=LOG_FORMAT
     )
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
 
     sys.excepthook = exception_handler
 
@@ -410,6 +430,10 @@ def scan(workq, idle_worker_count, log_dir):
                         logger.info(f'scan({pid}): scan: processing directory: {item}')
                         printed_banner = True
 
+                    if excluded(os.path.basename(entry.path)):
+                        logger.info(f'scan({pid}): scan: skipping excluded path: {item}')
+                        raise ExcludedFile()
+
                     if entry.is_file(follow_symlinks=False):
                         logger.info(f"scan({pid}): enqueueing item '{entry.path}'")
                         workq.put(entry.path)
@@ -418,21 +442,24 @@ def scan(workq, idle_worker_count, log_dir):
                         workq.put(entry.path)
                     else:
                         logger.info(f'scan({pid}): scan: {entry.path} - not a file or dir, skipping...')
+            except ExcludedFile:
+                # nothing to do, just continue (with finally block)
+                pass
             except NotADirectoryError:
                 # is current item a file?
                 statinfo = os.stat(item)
                 if stat.S_ISREG(statinfo.st_mode):
                     process_file(conn, item, statinfo)
                 else:
-                    workq.task_done()
-                    with idle_worker_count.get_lock():
-                        idle_worker_count.value += 1
+                    #workq.task_done()
+                    #with idle_worker_count.get_lock():
+                    #    idle_worker_count.value += 1
 
                     raise InternalError('Internal error: unknown item type found in work queue')
-
-            workq.task_done()
-            with idle_worker_count.get_lock():
-                idle_worker_count.value += 1
+            finally:
+                workq.task_done()
+                with idle_worker_count.get_lock():
+                    idle_worker_count.value += 1
 
             #logger.info()
 
@@ -507,7 +534,7 @@ if __name__ == '__main__':
             level=logging.DEBUG,
             format=LOG_FORMAT
         )
-        logger = logging.getLogger()
+        logger = logging.getLogger(__name__)
 
         sys.excepthook = exception_handler
 
@@ -525,59 +552,68 @@ if __name__ == '__main__':
                 level=logging.DEBUG,
                 format=LOG_FORMAT
             )
-            logger = logging.getLogger()
+            logger = logging.getLogger(__name__)
 
             sys.excepthook = exception_handler
 
             logger.info(f'main({pid}): starting...')
 
-            idle_iterations = 0
-            while True:
-                logger.info(f'main({pid}): idle_worker_count is {idle_worker_count.value}, workq size is {workq.qsize()}')
-                if (idle_worker_count.value == worker_count):
-                    idle_iterations += 1
+            try:
+                hang_detected = False
+                idle_iterations = 0
+                while True:
+                    logger.info(f'main({pid}): idle_worker_count is {idle_worker_count.value}, workq size is {workq.qsize()}')
 
-                    logger.info(f'main({pid}): all idle (qsize is {workq.qsize()}, idle iteration count is {idle_iterations})...')
-                    if workq.qsize() == 0:
-                        # all idle and nothing left to do -> shut it down
-                        logger.info(f'main({pid}): shutting down 0 (qsize is {workq.qsize()})...')
-                        for i in range(worker_count):
-                            workq.put(None)
+                    if (idle_worker_count.value > worker_count):
+                        logger.warning(f'main({pid}): idle_worker_count is too big! (fix the bug)')
 
-                        while workq.qsize() > 0:
+                    if (idle_worker_count.value >= worker_count):
+                        idle_iterations += 1
+
+                        logger.info(f'main({pid}): all idle (qsize is {workq.qsize()}, idle iteration count is {idle_iterations})...')
+                        if workq.qsize() == 0:
+                            # all idle and nothing left to do -> shut it down
+                            logger.info(f'main({pid}): shutting down 0 (qsize is {workq.qsize()})...')
+                            for i in range(worker_count):
+                                workq.put(None)
+
+                            while workq.qsize() > 0:
+                                time.sleep(QUEUE_DRAIN_SLEEP_INTERVAL)
+
+                            logger.info(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
+                            workq.close()
+
+                            logger.info(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
+
+                            break
+                        elif idle_iterations >= MAX_IDLE_ITERATIONS:
+                            # all idle and no progress -> shut it down
+                            hang_detected = True
+                            logger.debug(f'main({pid}): hang detected, shutting down (qsize is {workq.qsize()})...')
+
+                            for i in range(worker_count):
+                                workq.put(None)
+
                             time.sleep(QUEUE_DRAIN_SLEEP_INTERVAL)
 
-                        logger.info(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
-                        workq.close()
+                            logger.debug(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
+                            workq.close()
 
-                        logger.info(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
+                            logger.debug(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
 
-                        break
-                    elif idle_iterations >= MAX_IDLE_ITERATIONS:
-                        # all idle and no progress -> shut it down
-                        logger.info(f'main({pid}): shutting down 0 (qsize is {workq.qsize()})...')
+                            break
+                    else:
+                        idle_iterations = 0
 
-                        for i in range(worker_count):
-                            workq.put(None)
+                        logger.info(f'main({pid}): sleeping...')
+                        time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
+            except Exception as error:
+                logger.exception(error)
+            finally:
+                logger.debug(f'main({pid}): shutting down 3...')
 
-                        time.sleep(QUEUE_DRAIN_SLEEP_INTERVAL)
-
-                        logger.info(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
-                        workq.close()
-
-                        logger.info(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
-
-                        break
-                else:
-                    idle_iterations = 0
-
-                    logger.info(f'main({pid}): sleeping...')
-                    time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
-
-            logger.info(f'main({pid}): shutting down 3...')
-
-            if idle_iterations >= MAX_IDLE_ITERATIONS:
-                raise Exception('all idle and no progress, giving up')
+                if hang_detected:
+                    logger.error('Error: all idle and no progress, giving up')
 
     logger.info(f'main({pid}): all done.')
 
