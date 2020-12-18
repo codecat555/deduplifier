@@ -1,11 +1,10 @@
 
-CREATE OR REPLACE FUNCTION
-upsert_file(
-    agent_in text,
+CREATE OR REPLACE FUNCTION upsert_file
+(
     hostname_in text,
 --    drivename_in text,
     volumename_in text,
-    filepath_in text,
+    dirpath_in text,
     sepchar_in text,
     filename_in text,
     mime_type_in text,
@@ -16,7 +15,8 @@ upsert_file(
     create_date_in timestamp with time zone,
     modify_date_in timestamp with time zone,
     access_date_in timestamp with time zone,
-    discover_date_in timestamp with time zone
+    discover_date_in timestamp with time zone,
+    agent_pid_in integer
 )
 RETURNS integer LANGUAGE plpgsql AS $$
 DECLARE
@@ -31,19 +31,19 @@ BEGIN
 --    INSERT INTO drive  VALUES(DEFAULT, drivename_in)  ON CONFLICT (serialno) DO UPDATE SET serialno = EXCLUDED.serialno RETURNING id INTO v_drive_id;
     INSERT INTO volume VALUES(DEFAULT, volumename_in) ON CONFLICT (uuid) DO UPDATE SET uuid = EXCLUDED.uuid RETURNING id INTO v_volume_id;
 
-    v_path_id := upsert_path(filepath_in, sepchar_in);
+    v_path_id := upsert_path(dirpath_in, sepchar_in);
 
     --INSERT INTO location VALUES(DEFAULT, v_host_id, v_drive_id, v_volume_id, v_path_id) ON CONFLICT (host_id, drive_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
     INSERT INTO location VALUES(DEFAULT, v_host_id, v_volume_id, v_path_id) ON CONFLICT (host_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
 
-    INSERT INTO file VALUES(DEFAULT, v_location_id, filename_in, mime_type_in, mime_subtype_in, size_in_bytes_in, checksum_in, checksum_type_in, create_date_in, modify_date_in, access_date_in, discover_date_in) ON CONFLICT (location_id, name) DO UPDATE SET location_id = EXCLUDED.location_id RETURNING id INTO v_file_id;
+    INSERT INTO file VALUES(DEFAULT, v_location_id, filename_in, mime_type_in, mime_subtype_in, size_in_bytes_in, checksum_in, checksum_type_in, create_date_in, modify_date_in, access_date_in, discover_date_in, agent_pid_in)  ON CONFLICT (location_id, name) DO UPDATE SET location_id = EXCLUDED.location_id RETURNING id INTO v_file_id;
 
     RETURN v_file_id;
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION
-upsert_path(
+CREATE OR REPLACE FUNCTION upsert_path
+(
     remaining_path text,
     sepchar text
 )
@@ -90,8 +90,8 @@ $$;
 --    WHEN duplicate_object THEN null;
 --END $$;
 
-CREATE OR REPLACE FUNCTION
-upsert_image(
+CREATE OR REPLACE FUNCTION upsert_image
+(
     file_id_in integer,
     imghash_in text
 )
@@ -116,8 +116,8 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
-CREATE OR REPLACE FUNCTION
-upsert_image_tags(
+CREATE OR REPLACE FUNCTION upsert_image_tags
+(
     img_id INTEGER,
     tag_list image_tag_type[]
 )
@@ -141,3 +141,57 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION fetch_file_id
+(
+    dirpath_in text,
+    sepchar_in text,
+    filename_in text
+)
+RETURNS integer LANGUAGE plpgsql AS $$
+DECLARE
+    v_file_id integer;
+BEGIN
+    raise notice 'filename_in is %, dirpath_in is %', filename_in, dirpath_in;
+
+    WITH RECURSIVE allpaths AS (
+        SELECT id, name AS text FROM path WHERE id = 0
+        UNION ALL
+        SELECT child.id, concat_ws(sepchar_in, parent.text, child.name) AS text FROM path child
+        JOIN allpaths parent ON parent.id = child.parent_path_id
+    )
+    --SELECT f.id, concat_ws(sepchar_in, ap.text, f.name) FROM file f
+    SELECT f.id FROM file f
+    join location l on f.location_id = l.id
+    join allpaths ap on ap.id = l.path_id
+    WHERE f.name = filename_in AND ap.text = dirpath_in
+    INTO v_file_id;
+
+    raise notice '=> returning file_id %', v_file_id;
+
+    RETURN v_file_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fetch_file_id1
+(
+    dirpath_in text,
+    sepchar_in text,
+    filename_in text
+)
+RETURNS integer LANGUAGE plpgsql AS $$
+DECLARE
+    v_file_id integer;
+BEGIN
+    raise notice 'filename_in is %, dirpath_in is %', filename_in, dirpath_in;
+
+    SELECT f.id FROM file f
+    join location l on f.location_id = l.id
+    join paths p on p.id = l.path_id
+    WHERE f.name = filename_in AND p.path = dirpath_in
+    INTO v_file_id;
+
+    raise notice '=> returning file_id %', v_file_id;
+
+    RETURN v_file_id;
+END;
+$$;

@@ -4,3 +4,6 @@ host-vm-cloud-config.yml
 web-Dockerfile
 wip0
 test
+db_config.py
+*.swp
+*.swo

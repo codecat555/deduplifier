@@ -52,6 +52,8 @@ QUEUE_DRAIN_SLEEP_INTERVAL = 1
 
 LOG_FORMAT='%(asctime)s %(levelname)s %(message)s'
 
+ABORT_FILE = 'EXIT_REQUEST'
+
 # we skip files bigger than this size...useful during development but
 # maybe not in production.
 FILE_SIZE_THRESHOLD = 2 * 1024*1024*1024
@@ -77,15 +79,23 @@ hasher = FileHash(hash_type)
 
 logger = None
 
+skip_known_files = False
+
+abort_path = None
+
 class InternalError(Exception):
     pass
 
 class ExcludedFile(Exception):
     pass
 
+class FoundExitFlag(Exception):
+    pass
+
 # from https://stackoverflow.com/questions/6234405/logging-uncaught-exceptions-in-python
 def exception_handler(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
+        print('Keyboard interrupt...')
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
 
@@ -110,11 +120,11 @@ def upsert_image_tags(conn, path, img_id, tags):
     ]
     #if len(args[1]) == 0:
     #    args[1] = 'NULL'
-    logger.info(f"upsert_image_tags() args: [{', '.join([str(arg) for arg in args])}]")
+    logger.info(f"upsert_image_tags({os.getpid()}) args: {[str(arg) for arg in args]}")
 
     result = None
-    with conn.cursor() as cursor:
-        try:
+    try:
+        with conn.cursor() as cursor:
             #cursor.callproc('upsert_image_tags', args)
             sql = bytearray(cursor.mogrify('SELECT upsert_image_tags(%s, %s)', args))
             logger.debug(f"upsert_image_tags({os.getpid()}): sql is '{sql}'")
@@ -123,12 +133,12 @@ def upsert_image_tags(conn, path, img_id, tags):
             sql = bytes(sql)
             cursor.execute(sql)
             result = cursor.fetchall()[0][0]
-            #logger.debug(f"upsert_image_tags() result is {result}")
+            #logger.debug(f"upsert_image_tags({os.getpid()}) result is {result}")
             conn.commit()
-        except Exception as error:
-            logger.info(f'Error calling db: {error}')
-            conn.rollback()
-            raise
+    except Exception as error:
+        logger.info(f'Error calling db: {error}')
+        conn.rollback()
+        raise
 
     assert(len(tags) == len(result))
     return zip(tags, result)
@@ -147,25 +157,52 @@ def upsert_image(conn, path, file_id, tags):
         file_id,
         imghash
     ]
-    logger.info(f"upsert_image() args: [{', '.join([str(arg) for arg in args])}]")
+    logger.info(f"upsert_image({os.getpid()}) args: {[str(arg) for arg in args]}")
 
     img_id = None
-    with conn.cursor() as cursor:
-        try:
+    try:
+        with conn.cursor() as cursor:
             cursor.callproc('upsert_image', args)
             img_id = cursor.fetchone()[0]
-            logger.info(f"upsert_image() img_id is {img_id}")
+            logger.info(f"upsert_image({os.getpid()}) img_id is {img_id}")
             conn.commit()
-        except Exception as error:
-            logger.info(f'Error calling db: {error}')
-            conn.rollback()
-            raise
+    except Exception as error:
+        logger.info(f'Error calling db: {error}')
+        conn.rollback()
+        raise
 
     if len(tags) > 0:
         tag_ids = upsert_image_tags(conn, path, img_id, tags)
-        logger.info(f"upsert_image() tag_ids are {tag_ids}")
+        logger.info(f"upsert_image({os.getpid()}) tag_ids are {tag_ids}")
 
-    return 1
+    return img_id
+
+def fetch_file_id(conn, path):
+    logger = logging.getLogger(__name__)
+    logger.info(f'fetch_file_id({os.getpid()}): fetching file id: {path}')
+
+    agent_id = os.getpid()
+
+    args = [
+        os.path.dirname(path),
+        os.path.sep,
+        os.path.basename(path),
+    ]
+    logger.debug(f"fetch_file_id({os.getpid()}) args: {[str(arg) for arg in args]}")
+
+    file_id = None
+    try:
+        with conn.cursor() as cursor:
+            cursor.callproc('fetch_file_id1', args)
+            file_id = cursor.fetchone()[0]
+            logger.debug(f"fetch_file_id({os.getpid()}) file_id is {file_id}")
+            conn.commit()
+    except Exception as error:
+        logger.info(f'Error calling db: {error}')
+        conn.rollback()
+        raise
+
+    return file_id
 
 def get_drivename(path):
     logger = logging.getLogger(__name__)
@@ -216,10 +253,11 @@ def upsert_file(conn, path, statinfo, hash, mimetype):
 
     agent_id = os.getpid()
 
-    mime_type, mime_subtype = mimetype.split('/')
+    mime_type, mime_subtype, *junk = mimetype.split('/')
+    if len(junk) > 0:
+        logger.warning(f'upsert_file({os.getpid()}): mimetype has more than two components, ignoring the remainder')
 
     args = [
-        str(agent_id),
         platform.node(),
         #get_drivename(path),
         get_volname(path),
@@ -234,21 +272,22 @@ def upsert_file(conn, path, statinfo, hash, mimetype):
         time.ctime(statinfo.st_ctime),
         time.ctime(statinfo.st_mtime),
         time.ctime(statinfo.st_atime),
-        time.ctime()
+        time.ctime(),
+        agent_id
     ]
-    logger.info(f"upsert_file() args: [{', '.join([str(arg) for arg in args])}]")
+    logger.info(f"upsert_file({os.getpid()}) args: {[str(arg) for arg in args]}")
 
     result = None
-    with conn.cursor() as cursor:
-        try:
+    try:
+        with conn.cursor() as cursor:
             cursor.callproc('upsert_file', args)
             result = cursor.fetchone()[0]
-            logger.info(f"upsert_file() result is {result}")
+            logger.info(f"upsert_file({os.getpid()}) result is {result}")
             conn.commit()
-        except Exception as error:
-            logger.info(f'Error calling db: {error}')
-            conn.rollback()
-            raise
+    except Exception as error:
+        logger.info(f'Error calling db: {error}')
+        conn.rollback()
+        raise
 
     return result
 
@@ -369,6 +408,13 @@ def process_file(conn, path, statinfo):
     if file_size > FILE_SIZE_THRESHOLD:
         logger.warning(f'process_file({os.getpid()}): skipping too-big file: {path}')
         return
+
+    if skip_known_files:
+        file_id = fetch_file_id(conn, path)
+        if file_id:
+            logger.info(f'process_file({os.getpid()}): file already in db, skipping...: {file_id}')
+            return
+
     logger.info(f'process_file({os.getpid()}): upserting file of size {file_size}: {path}')
 
     logger.debug(f'process_file({os.getpid()}): hashing file...')
@@ -399,7 +445,7 @@ def scan(workq, idle_worker_count, log_dir):
     )
     logger = logging.getLogger(__name__)
 
-    sys.excepthook = exception_handler
+    #sys.excepthook = exception_handler
 
     conn = None
     error = None
@@ -407,9 +453,17 @@ def scan(workq, idle_worker_count, log_dir):
         conn = psycopg2.connect(**connection_parameters)
 
         while True:
-            if worker_count == 1 and workq.qsize() == 0:
-                logger.info(f'scan({pid}): single-threaded and work queue is empty, quitting...')
-                break
+            if worker_count == 1:
+                if workq.qsize() == 0:
+                    logger.info(f'scan({pid}): single-threaded and work queue is empty, quitting...')
+                    break
+
+                try:
+                    os.stat(abort_path)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise FoundExitFlag()
 
             logger.info(f'scan({pid}): fetching new item...')
             item = workq.get()
@@ -424,66 +478,55 @@ def scan(workq, idle_worker_count, log_dir):
             logger.info(f"scan({pid}): dequeued item '{item}'")
             printed_banner = False
             try:
-                # assume item is a directory and try scanning it
-                for entry in os.scandir(item):
-                    if not printed_banner:
-                        logger.info(f'scan({pid}): scan: processing directory: {item}')
-                        printed_banner = True
-
-                    if excluded(os.path.basename(entry.path)):
-                        logger.info(f'scan({pid}): scan: skipping excluded path: {item}')
-                        raise ExcludedFile()
-
-                    if entry.is_file(follow_symlinks=False):
-                        logger.info(f"scan({pid}): enqueueing item '{entry.path}'")
-                        workq.put(entry.path)
-                    elif entry.is_dir(follow_symlinks=False):
-                        logger.info(f"scan({pid}): enqueueing item '{entry.path}'")
-                        workq.put(entry.path)
-                    else:
-                        logger.info(f'scan({pid}): scan: {entry.path} - not a file or dir, skipping...')
-            except ExcludedFile:
-                # nothing to do, just continue (with finally block)
-                pass
-            except NotADirectoryError:
                 # is current item a file?
                 statinfo = os.stat(item)
                 if stat.S_ISREG(statinfo.st_mode):
                     process_file(conn, item, statinfo)
-                else:
-                    #workq.task_done()
-                    #with idle_worker_count.get_lock():
-                    #    idle_worker_count.value += 1
+                elif stat.S_ISDIR(statinfo.st_mode):
+                    # a directory, scan it and queue the interesting entries
+                    for entry in os.scandir(item):
+                        if not printed_banner:
+                            logger.info(f'scan({pid}): scan: processing directory: {item}')
+                            printed_banner = True
 
+                        if excluded(os.path.basename(entry.path)):
+                            logger.info(f'scan({pid}): scan: skipping excluded path: {item}')
+                            raise ExcludedFile()
+
+                        if entry.is_file(follow_symlinks=False):
+                            logger.info(f"scan({pid}): enqueueing item '{entry.path}'")
+                            workq.put(entry.path)
+                        elif entry.is_dir(follow_symlinks=False):
+                            logger.info(f"scan({pid}): enqueueing item '{entry.path}'")
+                            workq.put(entry.path)
+                        else:
+                            logger.info(f'scan({pid}): scan: {entry.path} - not a file or dir, skipping...')
+                else:
                     raise InternalError('Internal error: unknown item type found in work queue')
+            except FileNotFoundError:
+                logger.error('entry disappeared while sitting in queue')
+                logger.exception(error)
+            except ExcludedFile:
+                # nothing to do, just continue (with finally block)
+                pass
             finally:
                 workq.task_done()
                 with idle_worker_count.get_lock():
                     idle_worker_count.value += 1
 
-            #logger.info()
-
-        #logger.info()
         logger.info(f'scan({pid}): scan: at end of loop, workq is {workq.qsize()}, empty = {workq.empty()}')
-        #logger.info()
-    except(psycopg2.DatabaseError) as error:
-        logger.info(f'Database error: {error}')
+    except BaseException as error:
+        #logger.exception(f'scan({pid}): {error}')
+        logger.exception(error)
+
         if conn:
             conn.rollback()
+
+        logger.info(f'scan({pid}): getting idle lock')
+        with idle_worker_count.get_lock():
+            idle_worker_count.value += 1
+        logger.info(f'scan({pid}): idled and exiting...')
         raise
-    except (psycopg2.Error) as error:
-        logger.info(f'Error: {error}')
-        if conn:
-            conn.rollback()
-        raise
-    except Exception as error:
-        logger.info(f'scan({pid}): here, error is {error}')
-        if (error):
-            logger.info(f'scan({pid}): getting idle lock')
-            with idle_worker_count.get_lock():
-                idle_worker_count.value += 1
-            logger.info(f'scan({pid}): idled and exiting...')
-            raise
     finally:
         workq.close()
         if(conn):
@@ -492,15 +535,20 @@ def scan(workq, idle_worker_count, log_dir):
 def usage(exit_code, errmsg=None):
     if errmsg:
         logger.info('Error: ' + errmsg, file=sys.stderr)
-    logger.info(f'usage: {sys.argv[0]} <worker-count> <target-directory>[,<target-directory>...]', file=sys.stderr)
+    logger.info(f'usage: {sys.argv[0]} [-skip_known_files] <worker-count> <target-directory>[,<target-directory>...]', file=sys.stderr)
     exit(exit_code)
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
         usage(1)
 
+    first_arg_idx = 1
+    if '-skip-known-files' in sys.argv:
+        skip_known_files = True
+        first_arg_idx = 2
+
     try:
-        worker_count = int(sys.argv[1])
+        worker_count = int(sys.argv[first_arg_idx])
     except ValueError as error:
         usage(2, 'worker count must be a non-zero positive integer')
 
@@ -512,7 +560,7 @@ if __name__ == '__main__':
     idle_worker_count = mp.Value('i', worker_count)
 
     # prime the work queue with the list of target directories
-    for path in sys.argv[2:]:
+    for path in sys.argv[first_arg_idx+1:]:
         workq.put(os.path.abspath(path))
 
     log_dir = os.path.join(
@@ -523,6 +571,8 @@ if __name__ == '__main__':
         str(os.getpid())
     )
     os.makedirs(log_dir, mode=0o755)
+
+    abort_path = os.path.join(log_dir, ABORT_FILE)
 
     pid = os.getpid()
 
@@ -536,7 +586,7 @@ if __name__ == '__main__':
         )
         logger = logging.getLogger(__name__)
 
-        sys.excepthook = exception_handler
+        #sys.excepthook = exception_handler
 
         logger.info(f'main({pid}): starting...')
 
@@ -554,7 +604,7 @@ if __name__ == '__main__':
             )
             logger = logging.getLogger(__name__)
 
-            sys.excepthook = exception_handler
+            #sys.excepthook = exception_handler
 
             logger.info(f'main({pid}): starting...')
 
@@ -563,6 +613,15 @@ if __name__ == '__main__':
                 idle_iterations = 0
                 while True:
                     logger.info(f'main({pid}): idle_worker_count is {idle_worker_count.value}, workq size is {workq.qsize()}')
+
+                    try:
+                        os.stat(abort_path)
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        pool.terminate()
+                        pool.join()
+                        raise FoundExitFlag()
 
                     if (idle_worker_count.value > worker_count):
                         logger.warning(f'main({pid}): idle_worker_count is too big! (fix the bug)')
@@ -607,8 +666,10 @@ if __name__ == '__main__':
 
                         logger.info(f'main({pid}): sleeping...')
                         time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
-            except Exception as error:
+            except BaseException as error:
                 logger.exception(error)
+                pool.terminate()
+                pool.join()
             finally:
                 logger.debug(f'main({pid}): shutting down 3...')
 

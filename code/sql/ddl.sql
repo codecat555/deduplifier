@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS file (
     modify_date DATE NOT NULL,
     access_date DATE NOT NULL,
     discover_date DATE NOT NULL,
+    agent_pid INTEGER NOT NULL,
     PRIMARY KEY(id),
     CONSTRAINT fk_location FOREIGN KEY(location_id) REFERENCES location(id),
     UNIQUE(location_id, name)
@@ -101,6 +102,15 @@ CREATE TABLE IF NOT EXISTS image_tag (
     CONSTRAINT fk_image FOREIGN KEY(image_id) REFERENCES image(id),
     UNIQUE(exif_tag_id, image_id)
 );
+
+--CREATE MATERIALIZED VIEW paths AS
+--WITH RECURSIVE allpaths AS (
+--    SELECT id, name AS path FROM path WHERE id = 0
+--    UNION ALL
+--    SELECT child.id, concat_ws('/', parent.path, child.name) AS path FROM path child
+--    JOIN allpaths parent ON parent.id = child.parent_path_id
+--)
+--SELECT * FROM allpaths;
 
 -- describe tables, views and sequences
 \d

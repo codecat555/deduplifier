@@ -11,8 +11,8 @@ services:
     volumes:
       #- .:___CODE_PATH___
       - ..:___APP_PATH___
-      - "/etc/localtime:/etc/localtime:ro"
-      - "/etc/timezone:/etc/timezone:ro"
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     ports:
       - ___WEB_EXTERNAL_PORT___:___WEB_INSTANCE_PORT___
     depends_on:
@@ -25,12 +25,11 @@ services:
     volumes:
         - ___APP_PATH___:___APP_PATH___
         - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+        - /etc/localtime:/etc/localtime:ro
+        - /etc/timezone:/etc/timezone:ro
     build:
         context: .
         dockerfile: db-Dockerfile
-    volumes:
-      - "/etc/localtime:/etc/localtime:ro"
-      - "/etc/timezone:/etc/timezone:ro"
     environment:
       - TZ=___TIMEZONE___
       - PGDATA=___DB_PATH___
@@ -45,6 +44,19 @@ services:
     ports:
       - ___DB_EXTERNAL_PORT___:___DB_INSTANCE_PORT___ # map external port to internal port
 
+# get this working later...
+# see https://www.pgadmin.org/docs/pgadmin4/latest/container_deployment.html
+#  pgadmin:
+#    services:
+#      pgadmin:
+#        container_name: pgadmin
+#        image: dpage/pgadmin4:latest
+#        restart: always
+#        ports:
+#          - 8082:80
+#        environment:
+#          - PGADMIN_DEFAULT_EMAIL=dev@pgadmin.org
+#          - PGADMIN_DEFAULT_PASSWORD=password
   redis:
       image: redis:alpine
 
