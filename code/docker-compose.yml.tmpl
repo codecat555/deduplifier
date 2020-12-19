@@ -1,6 +1,7 @@
 version: "3.8"
 services:
   web:
+    container_name: web
     working_dir: ___CODE_PATH___
     restart: always
     environment:
@@ -20,10 +21,14 @@ services:
 
   # some port config hints found at https://stackoverflow.com/questions/37775702/changing-a-postgres-containers-server-port-in-docker-compose
   db:
+    container_name: db
     working_dir: ___APP_PATH___
     restart: always
     volumes:
-        - ___APP_PATH___:___APP_PATH___
+        # cannot use remote filesystem for db files, because sshfs freezes for some reason. so,
+        # we don't mount the APP_PATH but just the CODE_PATH.
+        #- ___APP_PATH___:___APP_PATH___
+        - ___CODE_PATH___:___CODE_PATH___
         - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
         - /etc/localtime:/etc/localtime:ro
         - /etc/timezone:/etc/timezone:ro
@@ -58,5 +63,6 @@ services:
 #          - PGADMIN_DEFAULT_EMAIL=dev@pgadmin.org
 #          - PGADMIN_DEFAULT_PASSWORD=password
   redis:
+      container_name: cache
       image: redis:alpine
 

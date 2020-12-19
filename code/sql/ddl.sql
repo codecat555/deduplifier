@@ -103,14 +103,14 @@ CREATE TABLE IF NOT EXISTS image_tag (
     UNIQUE(exif_tag_id, image_id)
 );
 
---CREATE MATERIALIZED VIEW paths AS
---WITH RECURSIVE allpaths AS (
---    SELECT id, name AS path FROM path WHERE id = 0
---    UNION ALL
---    SELECT child.id, concat_ws('/', parent.path, child.name) AS path FROM path child
---    JOIN allpaths parent ON parent.id = child.parent_path_id
---)
---SELECT * FROM allpaths;
+CREATE MATERIALIZED VIEW paths AS
+WITH RECURSIVE allpaths AS (
+    SELECT id, name AS path FROM path WHERE id = 0
+    UNION ALL
+    SELECT child.id, concat_ws('/', parent.path, child.name) AS path FROM path child
+    JOIN allpaths parent ON parent.id = child.parent_path_id
+)
+SELECT * FROM allpaths;
 
 -- describe tables, views and sequences
 \d

@@ -564,7 +564,8 @@ if __name__ == '__main__':
         workq.put(os.path.abspath(path))
 
     log_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0]))),
+        #os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0]))),
+        '/extra/me',
         'log',
         platform.node(),
         time.strftime('%Y-%m-%d-%H-%M-%S'),
