@@ -54,7 +54,7 @@ QUEUE_DRAIN_WAIT_TIME = 60
 
 LOG_FORMAT='%(asctime)s %(levelname)s %(message)s'
 
-ABORT_FILE = 'EXIT_REQUEST'
+ABORT_FILE = 'exit'
 
 # we skip files bigger than this size...useful during development but
 # maybe not in production.
@@ -489,12 +489,14 @@ def scan(workq, idle_worker_count, log_dir):
                     logger.info(f'scan({pid}): single-threaded and work queue is empty, quitting...')
                     break
 
-                #try:
-                #    os.stat(abort_path)
-                #except FileNotFoundError:
-                #    pass
-                #else:
-                #    raise FoundExitFlag()
+                try:
+                    os.stat(abort_path)
+                except FileNotFoundError:
+                    pass
+                else:
+                    #raise FoundExitFlag()
+                    logger.debug(f'scan({pid}): found exit request file, quitting...')
+                    break
 
             logger.info(f'scan({pid}): fetching new item...')
             item = workq.get()
@@ -543,7 +545,6 @@ def scan(workq, idle_worker_count, log_dir):
                 # nothing to do, just continue (with finally block)
                 pass
             finally:
-                #workq.task_done()
                 with idle_worker_count.get_lock():
                     idle_worker_count.value += 1
 
@@ -593,7 +594,7 @@ class InterruptibleQueue(mpq.Queue):
     def time_to_quit(self):
         self.quitting_time = True
         # drain the queue
-        while self.qsize > 0:
+        while self.qsize() > 0:
             super().get()
 
 if __name__ == '__main__':
@@ -630,6 +631,8 @@ if __name__ == '__main__':
         str(os.getpid())
     )
     os.makedirs(log_dir, mode=0o755)
+    # print log dir to stdout, for convenience
+    print(f"log dir is {log_dir}")
 
     abort_path = os.path.join(log_dir, ABORT_FILE)
 
@@ -679,6 +682,7 @@ if __name__ == '__main__':
                         pass
                     else:
                         workq.time_to_quit()
+                        print(f'NOTICE: found exit request file, quitting in {QUEUE_DRAIN_WAIT_TIME} seconds...')
                         time.sleep(QUEUE_DRAIN_WAIT_TIME)
                         pool.terminate()
                         pool.join()
@@ -700,9 +704,6 @@ if __name__ == '__main__':
                             while workq.qsize() > 0:
                                 time.sleep(QUEUE_DRAIN_SLEEP_INTERVAL)
 
-                            logger.info(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
-                            workq.close()
-
                             logger.info(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
 
                             break
@@ -715,9 +716,6 @@ if __name__ == '__main__':
                                 workq.put(None)
 
                             time.sleep(QUEUE_DRAIN_SLEEP_INTERVAL)
-
-                            logger.debug(f'main({pid}): shutting down 1 (qsize is {workq.qsize()})...')
-                            workq.close()
 
                             logger.debug(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
 
@@ -736,6 +734,9 @@ if __name__ == '__main__':
 
                 if hang_detected:
                     logger.error('Error: all idle and no progress, giving up')
+
+    logger.debug(f'main({pid}): closing workq...')
+    workq.close()
 
     logger.info(f'main({pid}): all done.')
 
