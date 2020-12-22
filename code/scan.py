@@ -17,10 +17,11 @@ import platform
 import subprocess
 
 import multiprocessing as mp
+# https://stackoverflow.com/questions/39496554/cannot-subclass-multiprocessing-queue-in-python-3-5
+import multiprocessing.queues as mpq
 
 import logging
 import logging.handlers
-import multiprocessing
 
 import re
 
@@ -49,6 +50,7 @@ import shlex
 MAIN_LOOP_SLEEP_INTERVAL = 3
 MAX_IDLE_ITERATIONS=4
 QUEUE_DRAIN_SLEEP_INTERVAL = 1
+QUEUE_DRAIN_WAIT_TIME = 60
 
 LOG_FORMAT='%(asctime)s %(levelname)s %(message)s'
 
@@ -123,25 +125,44 @@ def upsert_image_tags(conn, path, img_id, tags):
     logger.info(f"upsert_image_tags({os.getpid()}) args: {[str(arg) for arg in args]}")
 
     result = None
-    try:
-        with conn.cursor() as cursor:
-            #cursor.callproc('upsert_image_tags', args)
-            sql = bytearray(cursor.mogrify('SELECT upsert_image_tags(%s, %s)', args))
-            logger.debug(f"upsert_image_tags({os.getpid()}): sql is '{sql}'")
-            assert(sql[-1:] == b')')
-            sql[-1:] = b'::image_tag_type[])'
-            sql = bytes(sql)
-            cursor.execute(sql)
-            result = cursor.fetchall()[0][0]
-            #logger.debug(f"upsert_image_tags({os.getpid()}) result is {result}")
-            conn.commit()
-    except Exception as error:
-        logger.info(f'Error calling db: {error}')
-        conn.rollback()
-        raise
+    MAX_TRIES = 3
+    tries = 0
+    while tries < MAX_TRIES:
+        try:
+            with conn.cursor() as cursor:
+                #cursor.callproc('upsert_image_tags', args)
+                sql = bytearray(cursor.mogrify('SELECT upsert_image_tags(%s, %s)', args))
+                logger.debug(f"upsert_image_tags({os.getpid()}): sql is '{sql}'")
+                assert(sql[-1:] == b')')
+                sql[-1:] = b'::image_tag_type[])'
+                sql = bytes(sql)
+                cursor.execute(sql)
+                result = cursor.fetchall()[0][0]
+                #logger.debug(f"upsert_image_tags({os.getpid()}) result is {result}")
+                conn.commit()
+                break
+        except psycopg2.errors.DeadlockDetected as error:
+            # not sure why deadlocks are occurring here, but maybe this retry will help.
+            # see https://stackoverflow.com/questions/46366324/postgres-deadlocks-on-concurrent-upserts
+            # see 
+            logger.error(f'upsert_image_tags({os.getpid()}): Deadlock, rolling back and retrying: {error}')
+            conn.rollback()
+            tries += 1
+            time.sleep(1)
+        except Exception as error:
+            logger.info(f'Error calling db: {error}')
+            conn.rollback()
+            raise
 
-    assert(len(tags) == len(result))
-    return zip(tags, result)
+    if tries == MAX_TRIES:
+        logger.error(f'upsert_image_tags({os.getpid()}): upsert failed after {tries} tries.')
+    elif tries > 0:
+        logger.warning(f'upsert_image_tags({os.getpid()}): upsert succeeded after {tries} tries.')
+
+    if result:
+        assert(len(tags) == len(result))
+        result = zip(tags, result)
+    return result
 
 def upsert_image(conn, path, file_id, tags):
     logger = logging.getLogger(__name__)
@@ -173,7 +194,7 @@ def upsert_image(conn, path, file_id, tags):
 
     if len(tags) > 0:
         tag_ids = upsert_image_tags(conn, path, img_id, tags)
-        logger.info(f"upsert_image({os.getpid()}) tag_ids are {tag_ids}")
+        logger.info(f"upsert_image({os.getpid()}) tag_ids are {[t for t in tag_ids]}")
 
     return img_id
 
@@ -193,7 +214,7 @@ def fetch_file_id(conn, path):
     file_id = None
     try:
         with conn.cursor() as cursor:
-            cursor.callproc('fetch_file_id1', args)
+            cursor.callproc('fetch_file_id', args)
             file_id = cursor.fetchone()[0]
             logger.debug(f"fetch_file_id({os.getpid()}) file_id is {file_id}")
             conn.commit()
@@ -332,7 +353,12 @@ def get_tags(path, image):
                 elif gps_tag in INT_TAGS:
                     gps_value = int.from_bytes(gps_value, sys.byteorder)
                 elif isinstance(gps_value, bytes):
-                    gps_value = gps_value.decode()
+                    try:
+                        gps_value = gps_value.decode()
+                    except UnicodeDecodeError as error:
+                        logger.warning(f'get_tags({os.getpid()}): failed to decode tag value, skipping... ({gps_tag}: {gps_value})')
+                        logger.exception(error)
+                        continue
 
                 if not isinstance(gps_value, str):
                     gps_value = str(gps_value)
@@ -360,7 +386,12 @@ def get_tags(path, image):
             elif tag in INT_TAGS:
                 data = int.from_bytes(data, sys.byteorder)
             elif isinstance(data, bytes):
-                data = data.decode()
+                try:
+                    data = data.decode()
+                except UnicodeDecodeError as error:
+                    logger.warning(f'get_tags({os.getpid()}): failed to decode tag value, skipping... ({tag}: {data})')
+                    logger.exception(error)
+                    continue
 
             if not isinstance(data, str):
                 data = str(data)
@@ -458,12 +489,12 @@ def scan(workq, idle_worker_count, log_dir):
                     logger.info(f'scan({pid}): single-threaded and work queue is empty, quitting...')
                     break
 
-                try:
-                    os.stat(abort_path)
-                except FileNotFoundError:
-                    pass
-                else:
-                    raise FoundExitFlag()
+                #try:
+                #    os.stat(abort_path)
+                #except FileNotFoundError:
+                #    pass
+                #else:
+                #    raise FoundExitFlag()
 
             logger.info(f'scan({pid}): fetching new item...')
             item = workq.get()
@@ -486,11 +517,11 @@ def scan(workq, idle_worker_count, log_dir):
                     # a directory, scan it and queue the interesting entries
                     for entry in os.scandir(item):
                         if not printed_banner:
-                            logger.info(f'scan({pid}): scan: processing directory: {item}')
+                            logger.info(f'scan({pid}): scan: processing directory: {entry.path}')
                             printed_banner = True
 
                         if excluded(os.path.basename(entry.path)):
-                            logger.info(f'scan({pid}): scan: skipping excluded path: {item}')
+                            logger.info(f'scan({pid}): scan: skipping excluded path: {entry.path}')
                             raise ExcludedFile()
 
                         if entry.is_file(follow_symlinks=False):
@@ -506,11 +537,13 @@ def scan(workq, idle_worker_count, log_dir):
             except FileNotFoundError:
                 logger.error('entry disappeared while sitting in queue')
                 logger.exception(error)
+            except TimeToQuitException:
+                pass
             except ExcludedFile:
                 # nothing to do, just continue (with finally block)
                 pass
             finally:
-                workq.task_done()
+                #workq.task_done()
                 with idle_worker_count.get_lock():
                     idle_worker_count.value += 1
 
@@ -538,6 +571,31 @@ def usage(exit_code, errmsg=None):
     logger.info(f'usage: {sys.argv[0]} [-skip_known_files] <worker-count> <target-directory>[,<target-directory>...]', file=sys.stderr)
     exit(exit_code)
 
+class TimeToQuitException(Exception):
+    pass
+
+# a shared queue that can be interrupted
+class InterruptibleQueue(mpq.Queue):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs, ctx=mp.get_context())
+        self.quitting_time = False
+
+    def get(self, *args, **kwargs):
+        if self.quitting_time:
+            raise TimeToQuitException()
+        return super().get(*args, **kwargs)
+
+    def put(self, *args, **kwargs):
+        if self.quitting_time:
+            raise TimeToQuitException()
+        super().put(*args, **kwargs)
+
+    def time_to_quit(self):
+        self.quitting_time = True
+        # drain the queue
+        while self.qsize > 0:
+            super().get()
+
 if __name__ == '__main__':
     if len(sys.argv) < 3:
         usage(1)
@@ -556,7 +614,7 @@ if __name__ == '__main__':
         usage(3, 'worker count must be a non-zero positive integer')
 
     # create the work queue
-    workq = mp.JoinableQueue()
+    workq = InterruptibleQueue()
     idle_worker_count = mp.Value('i', worker_count)
 
     # prime the work queue with the list of target directories
@@ -620,6 +678,8 @@ if __name__ == '__main__':
                     except FileNotFoundError:
                         pass
                     else:
+                        workq.time_to_quit()
+                        time.sleep(QUEUE_DRAIN_WAIT_TIME)
                         pool.terminate()
                         pool.join()
                         raise FoundExitFlag()
