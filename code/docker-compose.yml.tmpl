@@ -22,6 +22,9 @@ services:
   # some port config hints found at https://stackoverflow.com/questions/37775702/changing-a-postgres-containers-server-port-in-docker-compose
   db:
     container_name: db
+    # increase shared memory size from default of 64MB.
+    # see https://stackoverflow.com/questions/56751565/pq-could-not-resize-shared-memory-segment-no-space-left-on-device
+    shm_size: 1g
     working_dir: ___APP_PATH___
     restart: always
     volumes:

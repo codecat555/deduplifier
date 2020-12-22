@@ -39,8 +39,7 @@ BEGIN
     INSERT INTO file VALUES(DEFAULT, v_location_id, filename_in, mime_type_in, mime_subtype_in, size_in_bytes_in, checksum_in, checksum_type_in, create_date_in, modify_date_in, access_date_in, discover_date_in, agent_pid_in)  ON CONFLICT (location_id, name) DO UPDATE SET location_id = EXCLUDED.location_id RETURNING id INTO v_file_id;
 
     RETURN v_file_id;
-END;
-$$;
+END $$;
 
 CREATE OR REPLACE FUNCTION upsert_path
 (
@@ -77,8 +76,7 @@ BEGIN
     END LOOP;
     raise notice '=> returning path_id %', path_id;
     RETURN path_id;
-END;
-$$;
+END $$;
 
 ---- from https://stackoverflow.com/questions/7624919/check-if-a-user-defined-type-already-exists-in-postgresql
 --DO $$ BEGIN
@@ -103,8 +101,7 @@ BEGIN
     INSERT INTO image VALUES(DEFAULT, file_id_in) ON CONFLICT (file_id) DO UPDATE SET file_id = EXCLUDED.file_id RETURNING id INTO img_id;
 
     RETURN img_id;
-END;
-$$;
+END $$;
 
 ---- from https://stackoverflow.com/questions/7624919/check-if-a-user-defined-type-already-exists-in-postgresql
 DO $$ BEGIN
@@ -131,48 +128,24 @@ BEGIN
         LOOP
             INSERT INTO exif_tag VALUES(DEFAULT, tag_list[i].tag_name) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id INTO tag_id;
             
-            INSERT INTO image_tag VALUES(tag_id, img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET exif_tag_id = EXCLUDED.exif_tag_id;
+            -- do this in a subsequent loop...to avoid deadlocks (
+            --INSERT INTO image_tag VALUES(tag_id, img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET exif_tag_id = EXCLUDED.exif_tag_id;
+            -- might try this, instead...
+            --INSERT INTO image_tag VALUES(tag_id, img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET image_id = EXCLUDED.image_id;
 
             retval = array_append(retval, tag_id);
+        END LOOP;
+        FOR i IN 1 .. array_upper(tag_list, 1)
+        LOOP
+            -- try this here, first
+            INSERT INTO image_tag VALUES(retval[i], img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET image_id = EXCLUDED.image_id;
         END LOOP;
     END IF;
 
     RETURN retval;
-END;
-$$;
+END $$;
 
 CREATE OR REPLACE FUNCTION fetch_file_id
-(
-    dirpath_in text,
-    sepchar_in text,
-    filename_in text
-)
-RETURNS integer LANGUAGE plpgsql AS $$
-DECLARE
-    v_file_id integer;
-BEGIN
-    raise notice 'filename_in is %, dirpath_in is %', filename_in, dirpath_in;
-
-    WITH RECURSIVE allpaths AS (
-        SELECT id, name AS text FROM path WHERE id = 0
-        UNION ALL
-        SELECT child.id, concat_ws(sepchar_in, parent.text, child.name) AS text FROM path child
-        JOIN allpaths parent ON parent.id = child.parent_path_id
-    )
-    --SELECT f.id, concat_ws(sepchar_in, ap.text, f.name) FROM file f
-    SELECT f.id FROM file f
-    join location l on f.location_id = l.id
-    join allpaths ap on ap.id = l.path_id
-    WHERE f.name = filename_in AND ap.text = dirpath_in
-    INTO v_file_id;
-
-    raise notice '=> returning file_id %', v_file_id;
-
-    RETURN v_file_id;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION fetch_file_id1
 (
     dirpath_in text,
     sepchar_in text,
@@ -187,11 +160,10 @@ BEGIN
     SELECT f.id FROM file f
     join location l on f.location_id = l.id
     join paths p on p.id = l.path_id
-    WHERE f.name = filename_in AND p.path = dirpath_in
+    WHERE f.name = filename_in AND p.fullpath = dirpath_in
     INTO v_file_id;
 
     raise notice '=> returning file_id %', v_file_id;
 
     RETURN v_file_id;
-END;
-$$;
+END $$;
