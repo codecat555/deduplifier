@@ -75,15 +75,13 @@ for p in EXCLUDE_PATTERNS:
 
 worker_count = 0
 
-mime = magic.Magic(mime=True)
-hash_type = 'sha256'
-hasher = FileHash(hash_type)
-
 logger = None
 
 skip_known_files = False
 
 abort_path = None
+
+hash_type = 'sha256'
 
 class InternalError(Exception):
     pass
@@ -94,376 +92,385 @@ class ExcludedFile(Exception):
 class FoundExitFlag(Exception):
     pass
 
-# from https://stackoverflow.com/questions/6234405/logging-uncaught-exceptions-in-python
-def exception_handler(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        print('Keyboard interrupt...')
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
+class FileProcessor:
+    def __init__(self, connection_parameters, hasher):
+        self.connection_parameters = connection_parameters
+        self.mime = magic.Magic(mime=True)
+        self.hasher = hasher
+        self.pid = os.getpid()
 
-    logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+        # we delay opening a connection until the first time process_file() is called
+        self.conn = None
+
+    def upsert_image_tags(self, path, img_id, tags):
+        logger = logging.getLogger(__name__)
+
+        logger.info(f'upsert_image_tags({self.pid}): upserting image tags: {path}')
+
+        args = [
+            img_id,
+            [(key, value) for key,value in tags.items()]
+        ]
+        logger.info(f"upsert_image_tags({self.pid}) args: {[str(arg) for arg in args]}")
+
+        result = None
+# WIP - make this a property
+        MAX_TRIES = 3
+        tries = 0
+        while tries < MAX_TRIES:
+            try:
+                with self.conn.cursor() as cursor:
+                    #cursor.callproc('upsert_image_tags', args)
+                    sql = bytearray(cursor.mogrify('SELECT upsert_image_tags(%s, %s)', args))
+                    logger.debug(f"upsert_image_tags({self.pid}): sql is '{sql}'")
+                    assert(sql[-1:] == b')')
+                    sql[-1:] = b'::image_tag_type[])'
+                    sql = bytes(sql)
+                    cursor.execute(sql)
+                    result = cursor.fetchall()[0][0]
+                    #logger.debug(f"upsert_image_tags({self.pid}) result is {result}")
+                    self.conn.commit()
+                    break
+            except psycopg2.errors.DeadlockDetected as error:
+                # not sure why deadlocks are occurring here, but maybe this retry will help.
+                # see https://stackoverflow.com/questions/46366324/postgres-deadlocks-on-concurrent-upserts
+                # see 
+                logger.error(f'upsert_image_tags({self.pid}): Deadlock, rolling back and retrying: {error}')
+                self.conn.rollback()
+                tries += 1
+                time.sleep(1)
+            except Exception as error:
+                logger.info(f'Error calling db: {error}')
+                self.conn.rollback()
+                raise
+
+        if tries == MAX_TRIES:
+            logger.error(f'upsert_image_tags({self.pid}): upsert failed after {tries} tries.')
+        elif tries > 0:
+            logger.warning(f'upsert_image_tags({self.pid}): upsert succeeded after {tries} tries.')
+
+        if result:
+            assert(len(tags) == len(result))
+            result = zip(tags, result)
+        return result
+
+    def upsert_image(self, path, file_id, tags):
+        logger = logging.getLogger(__name__)
+        logger.info(f'upsert_image({self.pid}): upserting image: {path}')
+
+        agent_id = self.pid
+
+# WIP - do something here, or just remove it...?
+        # fake imagehash for now
+        #imghash = str(time.time())
+        imghash = None
+
+        args = [
+            file_id,
+            imghash
+        ]
+        logger.info(f"upsert_image({self.pid}) args: {[str(arg) for arg in args]}")
+
+        img_id = None
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.callproc('upsert_image', args)
+                img_id = cursor.fetchone()[0]
+                logger.info(f"upsert_image({self.pid}) img_id is {img_id}")
+                self.conn.commit()
+        except Exception as error:
+            logger.info(f'Error calling db: {error}')
+            self.conn.rollback()
+            raise
+
+        if len(tags) > 0:
+            tag_ids = self.upsert_image_tags(path, img_id, tags)
+            logger.info(f"upsert_image({self.pid}) tag_ids are {[t for t in tag_ids]}")
+
+        return img_id
+
+    def fetch_file_id(self, path):
+        logger = logging.getLogger(__name__)
+        logger.info(f'fetch_file_id({self.pid}): fetching file id: {path}')
+
+        agent_id = self.pid
+
+        args = [
+            os.path.dirname(path),
+            os.path.sep,
+            os.path.basename(path),
+        ]
+        logger.debug(f"fetch_file_id({self.pid}) args: {[str(arg) for arg in args]}")
+
+        file_id = None
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.callproc('fetch_file_id', args)
+                file_id = cursor.fetchone()[0]
+                logger.debug(f"fetch_file_id({self.pid}) file_id is {file_id}")
+                # no need to save anything during fetch
+                self.conn.rollback()
+        except Exception as error:
+            logger.info(f'Error calling db: {error}')
+            self.conn.rollback()
+            raise
+
+        return file_id
+
+    def upsert_file(self, path, statinfo, hash, mimetype):
+        logger = logging.getLogger(__name__)
+        logger.info(f'upsert_file({self.pid}): upserting file with hash {hash} and type {mimetype} - {path}')
+
+        agent_id = self.pid
+
+        mime_type, mime_subtype, *junk = mimetype.split('/')
+        if len(junk) > 0:
+            logger.warning(f'upsert_file({self.pid}): mimetype has more than two components, ignoring the remainder')
+
+        args = [
+            platform.node(),
+            #self.get_drivename(path),
+            self.get_volname(path),
+            os.path.dirname(path),
+            os.path.sep,
+            os.path.basename(path),
+            mime_type,
+            mime_subtype,
+            str(statinfo.st_size),
+            hash,
+            hash_type,
+            time.ctime(statinfo.st_ctime),
+            time.ctime(statinfo.st_mtime),
+            time.ctime(statinfo.st_atime),
+            time.ctime(),
+            agent_id
+        ]
+        logger.info(f"upsert_file({self.pid}) args: {[str(arg) for arg in args]}")
+
+        result = None
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.callproc('upsert_file', args)
+                result = cursor.fetchone()[0]
+                logger.info(f"upsert_file({self.pid}) result is {result}")
+                self.conn.commit()
+        except Exception as error:
+            logger.info(f'Error calling db: {error}')
+            self.conn.rollback()
+            raise
+
+        return result
+
+    def get_drivename(self, path):
+        logger = logging.getLogger(__name__)
+        logger.info(f'get_drivename({self.pid}): path is {path}')
+        if platform.system() == 'Linux':
+            result = 1
+        elif platform.system() == 'Windows':
+            #assert(wmiobj is not None)
+            #raise Exception("Windows support not implemented yet, can't get drive name")
+            result = 1
+        else:
+            raise Exception(f"unsupported system ({platform.system()}), can't get drive name")
+
+        #logger.debug(f'get_drivename({self.pid}): result is {result}')
+        return result
+
+    def get_volname(self, path):
+        logger = logging.getLogger(__name__)
+        #logger.info(f'get_volname({self.pid}): path is {path}')
+        if platform.system() == 'Linux':
+            # see https://askubuntu.com/questions/1096813/how-to-get-uuid-partition-form-a-given-file-path-in-python
+            completed_process = subprocess.run(
+                ['/usr/bin/bash', '-c', f'/usr/sbin/blkid -o value $(/usr/bin/df --output=source {shlex.quote(path)} | tail -1) | head -1'],
+                check=True,
+                text=True,
+                capture_output=True
+            )
+            result = completed_process.stdout.rstrip()
+        elif platform.system() == 'Windows':
+            command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{shlex.quote(path)}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
+            completed_process = subprocess.run(
+                [r'powershell.exe', r'-Command', command_string],
+                check=True,
+                text=True,
+                capture_output=True
+            )
+            #logger.info(f'get_volname({self.pid}): raw output is {completed_process.stdout}')
+            result = completed_process.stdout.strip('{}\n')
+        else:
+            raise Exception(f"unsupported system ({platform.system()}), can't get volume name")
+
+        #logger.info(f'get_volname({self.pid}): result is {result}')
+        return result
+
+    def get_tags(self, path, image):
+        logger = logging.getLogger(__name__)
+        logger.debug(f'get_tags({self.pid}): starting...')
+        tags = {}
+        exifdata = image.getexif()
+
+        # now, handle the rest
+        for tag_id in exifdata:
+            tag = TAGS.get(tag_id, tag_id)
+            if tag == tag_id:
+                logger.warning(f'unrecognized tag: {tag}')
+
+            if tag_id in EXCLUDED_TAGS or tag in EXCLUDED_TAGS:
+                logger.info(f'get_tags({self.pid}):   - excluding tag: {tag}')
+                continue
+
+            data = exifdata.get(tag_id)
+
+            # handle gps data
+            # see https://gist.github.com/erans/983821/e30bd051e1b1ae3cb07650f24184aa15c0037ce8
+            # see https://sylvaindurand.org/gps-data-from-photos-with-python/
+            if tag == 'GPSInfo':
+
+                logger.info(f'get_tags({self.pid}):   - found GPSInfo tag')
+
+                logger.info(f'get_tags({self.pid}):   - processing GPSInfo data')
+
+                for gps_tag_id, gps_value in data.items():
+                    gps_tag = GPSTAGS.get(gps_tag_id, gps_tag_id)
+
+                    logger.info(f'get_tags({self.pid}):   - found GPSInfo tag: {gps_tag}, with value {gps_value}.')
+
+                    if isinstance(gps_value, IFDRational):
+                        assert(gps_value.imag == 0)
+                        gps_value = gps_value.real
+                    elif gps_tag in TUPLE_TAGS:
+                        ba = bytearray(gps_value)
+                        gps_value = tuple(ba)
+                    elif gps_tag in INT_TAGS:
+                        gps_value = int.from_bytes(gps_value, sys.byteorder)
+                    elif isinstance(gps_value, bytes):
+                        try:
+                            gps_value = gps_value.decode()
+                        except UnicodeDecodeError as error:
+                            logger.warning(f'get_tags({self.pid}): failed to decode tag value, skipping... ({gps_tag}: {gps_value})')
+                            logger.exception(error)
+                            continue
+
+                    if not isinstance(gps_value, str):
+                        gps_value = str(gps_value)
+
+                    # trim strings from first null code
+                    try:
+                        idx = gps_value.index('\x00')
+                        before = gps_value
+                        gps_value = gps_value[:idx]
+# WIP - review this
+                        logger.debug(f'get_tags({self.pid}): HERE 1 - gps_tag is {gps_tag}, idx is {idx}, before is {before}, after is {gps_value}')
+                    except ValueError:
+                        pass
+
+                    assert(gps_tag not in tags)
+                    tags[gps_tag] = gps_value
+
+                    logger.info(f'get_tags({self.pid}): {gps_tag}: {gps_value}')
+            else:
+                if isinstance(data, IFDRational):
+                    assert(data.imag == 0)
+                    data = data.real
+                elif tag in TUPLE_TAGS:
+                    ba = bytearray(data)
+                    data = tuple(ba)
+                elif tag in INT_TAGS:
+                    data = int.from_bytes(data, sys.byteorder)
+                elif isinstance(data, bytes):
+                    try:
+                        data = data.decode()
+                    except UnicodeDecodeError as error:
+                        logger.warning(f'get_tags({self.pid}): failed to decode tag value, skipping... ({tag}: {data})')
+                        logger.exception(error)
+                        continue
+
+                if not isinstance(data, str):
+                    data = str(data)
+
+                # trim strings from first null value
+                try:
+                    idx = data.index('\x00')
+                    before = data
+                    data = data[:idx]
+                    logger.debug(f'get_tags({self.pid}): HERE 0 - tag is {tag}, idx is {idx}, before is {before}, after is {data}')
+                except ValueError:
+                    pass
+
+                logger.info(f'get_tags({self.pid}): {tag}: {data}')
+                assert(tag not in tags)
+                tags[tag] = data
+
+        logger.debug(f'get_tags({self.pid}): done.')
+
+        return tags
+
+    def process_image(self, path, file_id, mimetype):
+        logger = logging.getLogger(__name__)
+        logger.info(f'process_image({self.pid}): processing image file: {path} ({mimetype})')
+
+        image_id = None
+        try:
+            with Image.open(path) as image:
+                # capture (and filter) the image tags, for upload
+                tags = self.get_tags(path, image)
+        except Exception as error:
+            logger.warning(f'get_tags({self.pid}): failed to open image file, skipping...')
+            logger.exception(error)
+        else:
+            # upsert image in db
+            image_id = self.upsert_image(path, file_id, tags)
+
+        # return db image id
+        return image_id
+
+    def process_file(self, path, statinfo, skip_known_files):
+        logger = logging.getLogger(__name__)
+
+        if not self.conn:
+            self.conn = psycopg2.connect(**self.connection_parameters)
+
+        file_size = statinfo.st_size
+# WIP - make this limit a parameter
+        if file_size > FILE_SIZE_THRESHOLD:
+            logger.warning(f'process_file({self.pid}): skipping too-big file: {path}')
+            return
+
+        if skip_known_files:
+            file_id = self.fetch_file_id(path)
+            if file_id:
+                logger.info(f'process_file({self.pid}): file already in db, skipping...: {file_id}')
+                return file_id
+
+        logger.info(f'process_file({self.pid}): upserting file of size {file_size}: {path}')
+
+        logger.debug(f'process_file({self.pid}): hashing file...')
+        hash = self.hasher.hash_file(path)
+        logger.debug(f'process_file({self.pid}): hashing complete.')
+
+        mimetype = self.mime.from_file(path)
+        logger.debug(f'process_file({self.pid}): mimetype is {mimetype}')
+
+        # upsert file
+        file_id = self.upsert_file(path, statinfo, hash, mimetype)
+        logger.info(f'process_file({self.pid}): upserted file: {file_id}')
+
+        image_id = None
+        if (mimetype.split('/'))[0] == 'image':
+            image_id = self.process_image(path, file_id, mimetype)
+        #else:
+        #    logger.info(f'process_file({self.pid}): skipping file: {path} ({mimetype})')
+
+    def __del__(self):
+        if self.conn:
+            self.conn.close()
 
 def excluded(string):
     for pat in EXCLUDE_REGEX:
         if pat.match(string):
             return True
     return False
-
-def upsert_image_tags(conn, path, img_id, tags):
-    logger = logging.getLogger(__name__)
-
-    logger.info(f'upsert_image_tags({os.getpid()}): upserting image tags: {path}')
-
-    agent_id = os.getpid()
-
-    args = [
-        img_id,
-        [(key, value) for key,value in tags.items()]
-    ]
-    #if len(args[1]) == 0:
-    #    args[1] = 'NULL'
-    logger.info(f"upsert_image_tags({os.getpid()}) args: {[str(arg) for arg in args]}")
-
-    result = None
-    MAX_TRIES = 3
-    tries = 0
-    while tries < MAX_TRIES:
-        try:
-            with conn.cursor() as cursor:
-                #cursor.callproc('upsert_image_tags', args)
-                sql = bytearray(cursor.mogrify('SELECT upsert_image_tags(%s, %s)', args))
-                logger.debug(f"upsert_image_tags({os.getpid()}): sql is '{sql}'")
-                assert(sql[-1:] == b')')
-                sql[-1:] = b'::image_tag_type[])'
-                sql = bytes(sql)
-                cursor.execute(sql)
-                result = cursor.fetchall()[0][0]
-                #logger.debug(f"upsert_image_tags({os.getpid()}) result is {result}")
-                conn.commit()
-                break
-        except psycopg2.errors.DeadlockDetected as error:
-            # not sure why deadlocks are occurring here, but maybe this retry will help.
-            # see https://stackoverflow.com/questions/46366324/postgres-deadlocks-on-concurrent-upserts
-            # see 
-            logger.error(f'upsert_image_tags({os.getpid()}): Deadlock, rolling back and retrying: {error}')
-            conn.rollback()
-            tries += 1
-            time.sleep(1)
-        except Exception as error:
-            logger.info(f'Error calling db: {error}')
-            conn.rollback()
-            raise
-
-    if tries == MAX_TRIES:
-        logger.error(f'upsert_image_tags({os.getpid()}): upsert failed after {tries} tries.')
-    elif tries > 0:
-        logger.warning(f'upsert_image_tags({os.getpid()}): upsert succeeded after {tries} tries.')
-
-    if result:
-        assert(len(tags) == len(result))
-        result = zip(tags, result)
-    return result
-
-def upsert_image(conn, path, file_id, tags):
-    logger = logging.getLogger(__name__)
-    logger.info(f'upsert_image({os.getpid()}): upserting image: {path}')
-
-    agent_id = os.getpid()
-
-    # fake imagehash for now
-    #imghash = str(time.time())
-    imghash = None
-
-    args = [
-        file_id,
-        imghash
-    ]
-    logger.info(f"upsert_image({os.getpid()}) args: {[str(arg) for arg in args]}")
-
-    img_id = None
-    try:
-        with conn.cursor() as cursor:
-            cursor.callproc('upsert_image', args)
-            img_id = cursor.fetchone()[0]
-            logger.info(f"upsert_image({os.getpid()}) img_id is {img_id}")
-            conn.commit()
-    except Exception as error:
-        logger.info(f'Error calling db: {error}')
-        conn.rollback()
-        raise
-
-    if len(tags) > 0:
-        tag_ids = upsert_image_tags(conn, path, img_id, tags)
-        logger.info(f"upsert_image({os.getpid()}) tag_ids are {[t for t in tag_ids]}")
-
-    return img_id
-
-def fetch_file_id(conn, path):
-    logger = logging.getLogger(__name__)
-    logger.info(f'fetch_file_id({os.getpid()}): fetching file id: {path}')
-
-    agent_id = os.getpid()
-
-    args = [
-        os.path.dirname(path),
-        os.path.sep,
-        os.path.basename(path),
-    ]
-    logger.debug(f"fetch_file_id({os.getpid()}) args: {[str(arg) for arg in args]}")
-
-    file_id = None
-    try:
-        with conn.cursor() as cursor:
-            cursor.callproc('fetch_file_id', args)
-            file_id = cursor.fetchone()[0]
-            logger.debug(f"fetch_file_id({os.getpid()}) file_id is {file_id}")
-            conn.commit()
-    except Exception as error:
-        logger.info(f'Error calling db: {error}')
-        conn.rollback()
-        raise
-
-    return file_id
-
-def get_drivename(path):
-    logger = logging.getLogger(__name__)
-    logger.info(f'get_drivename({os.getpid()}): path is {path}')
-    if platform.system() == 'Linux':
-        result = 1
-    elif platform.system() == 'Windows':
-        #assert(wmiobj is not None)
-        #raise Exception("Windows support not implemented yet, can't get drive name")
-        result = 1
-    else:
-        raise Exception(f"unsupported system ({platform.system()}), can't get drive name")
-
-    #logger.debug(f'get_drivename({os.getpid()}): result is {result}')
-    return result
-
-def get_volname(path):
-    logger = logging.getLogger(__name__)
-    #logger.info(f'get_volname({os.getpid()}): path is {path}')
-    if platform.system() == 'Linux':
-        # see https://askubuntu.com/questions/1096813/how-to-get-uuid-partition-form-a-given-file-path-in-python
-        completed_process = subprocess.run(
-            ['/usr/bin/bash', '-c', f'/usr/sbin/blkid -o value $(/usr/bin/df --output=source {shlex.quote(path)} | tail -1) | head -1'],
-            check=True,
-            text=True,
-            capture_output=True
-        )
-        result = completed_process.stdout.rstrip()
-    elif platform.system() == 'Windows':
-        command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{shlex.quote(path)}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
-        completed_process = subprocess.run(
-            [r'powershell.exe', r'-Command', command_string],
-            check=True,
-            text=True,
-            capture_output=True
-        )
-        #logger.info(f'get_volname({os.getpid()}): raw output is {completed_process.stdout}')
-        result = completed_process.stdout.strip('{}\n')
-    else:
-        raise Exception(f"unsupported system ({platform.system()}), can't get volume name")
-
-    #logger.info(f'get_volname({os.getpid()}): result is {result}')
-    return result
-
-def upsert_file(conn, path, statinfo, hash, mimetype):
-    logger = logging.getLogger(__name__)
-    logger.info(f'upsert_file({os.getpid()}): upserting file with hash {hash} and type {mimetype} - {path}')
-
-    agent_id = os.getpid()
-
-    mime_type, mime_subtype, *junk = mimetype.split('/')
-    if len(junk) > 0:
-        logger.warning(f'upsert_file({os.getpid()}): mimetype has more than two components, ignoring the remainder')
-
-    args = [
-        platform.node(),
-        #get_drivename(path),
-        get_volname(path),
-        os.path.dirname(path),
-        os.path.sep,
-        os.path.basename(path),
-        mime_type,
-        mime_subtype,
-        str(statinfo.st_size),
-        hash,
-        hash_type,
-        time.ctime(statinfo.st_ctime),
-        time.ctime(statinfo.st_mtime),
-        time.ctime(statinfo.st_atime),
-        time.ctime(),
-        agent_id
-    ]
-    logger.info(f"upsert_file({os.getpid()}) args: {[str(arg) for arg in args]}")
-
-    result = None
-    try:
-        with conn.cursor() as cursor:
-            cursor.callproc('upsert_file', args)
-            result = cursor.fetchone()[0]
-            logger.info(f"upsert_file({os.getpid()}) result is {result}")
-            conn.commit()
-    except Exception as error:
-        logger.info(f'Error calling db: {error}')
-        conn.rollback()
-        raise
-
-    return result
-
-def get_tags(path, image):
-    logger = logging.getLogger(__name__)
-    logger.debug(f'get_tags({os.getpid()}): starting...')
-    tags = {}
-    exifdata = image.getexif()
-
-    # now, handle the rest
-    for tag_id in exifdata:
-        tag = TAGS.get(tag_id, tag_id)
-        if tag == tag_id:
-            logger.warning(f'unrecognized tag: {tag}')
-
-        if tag_id in EXCLUDED_TAGS or tag in EXCLUDED_TAGS:
-            logger.info(f'get_tags({os.getpid()}):   - excluding tag: {tag}')
-            continue
-
-        data = exifdata.get(tag_id)
-
-        # handle gps data
-        # see https://gist.github.com/erans/983821/e30bd051e1b1ae3cb07650f24184aa15c0037ce8
-        # see https://sylvaindurand.org/gps-data-from-photos-with-python/
-        if tag == 'GPSInfo':
-
-            logger.info(f'get_tags({os.getpid()}):   - found GPSInfo tag')
-
-            logger.info(f'get_tags({os.getpid()}):   - processing GPSInfo data')
-
-            for gps_tag_id, gps_value in data.items():
-                gps_tag = GPSTAGS.get(gps_tag_id, gps_tag_id)
-
-                logger.info(f'get_tags({os.getpid()}):   - found GPSInfo tag: {gps_tag}, with value {gps_value}.')
-
-                if isinstance(gps_value, IFDRational):
-                    assert(gps_value.imag == 0)
-                    gps_value = gps_value.real
-                elif gps_tag in TUPLE_TAGS:
-                    ba = bytearray(gps_value)
-                    gps_value = tuple(ba)
-                elif gps_tag in INT_TAGS:
-                    gps_value = int.from_bytes(gps_value, sys.byteorder)
-                elif isinstance(gps_value, bytes):
-                    try:
-                        gps_value = gps_value.decode()
-                    except UnicodeDecodeError as error:
-                        logger.warning(f'get_tags({os.getpid()}): failed to decode tag value, skipping... ({gps_tag}: {gps_value})')
-                        logger.exception(error)
-                        continue
-
-                if not isinstance(gps_value, str):
-                    gps_value = str(gps_value)
-
-                # trim strings from first null code
-                try:
-                    idx = gps_value.index('\x00')
-                    before = gps_value
-                    gps_value = gps_value[:idx]
-                    logger.debug(f'get_tags({os.getpid()}): HERE 1 - gps_tag is {gps_tag}, idx is {idx}, before is {before}, after is {gps_value}')
-                except ValueError:
-                    pass
-
-                assert(gps_tag not in tags)
-                tags[gps_tag] = gps_value
-
-                logger.info(f'get_tags({os.getpid()}): {gps_tag}: {gps_value}')
-        else:
-            if isinstance(data, IFDRational):
-                assert(data.imag == 0)
-                data = data.real
-            elif tag in TUPLE_TAGS:
-                ba = bytearray(data)
-                data = tuple(ba)
-            elif tag in INT_TAGS:
-                data = int.from_bytes(data, sys.byteorder)
-            elif isinstance(data, bytes):
-                try:
-                    data = data.decode()
-                except UnicodeDecodeError as error:
-                    logger.warning(f'get_tags({os.getpid()}): failed to decode tag value, skipping... ({tag}: {data})')
-                    logger.exception(error)
-                    continue
-
-            if not isinstance(data, str):
-                data = str(data)
-
-            # trim strings from first null value
-            try:
-                idx = data.index('\x00')
-                before = data
-                data = data[:idx]
-                logger.debug(f'get_tags({os.getpid()}): HERE 0 - tag is {tag}, idx is {idx}, before is {before}, after is {data}')
-            except ValueError:
-                pass
-
-            logger.info(f'get_tags({os.getpid()}): {tag}: {data}')
-            assert(tag not in tags)
-            tags[tag] = data
-
-    logger.debug(f'get_tags({os.getpid()}): done.')
-
-    return tags
-
-def process_image(conn, path, file_id, mimetype):
-    logger = logging.getLogger(__name__)
-    logger.info(f'process_image({os.getpid()}): processing image file: {path} ({mimetype})')
-
-    image_id = None
-    try:
-        with Image.open(path) as image:
-            # capture (and filter) the image tags, for upload
-            tags = get_tags(path, image)
-    except Exception as error:
-        logger.warning(f'get_tags({os.getpid()}): failed to open image file, skipping...')
-        logger.exception(error)
-    else:
-        # upsert image in db
-        image_id = upsert_image(conn, path, file_id, tags)
-
-    # return db image id
-    return image_id
-
-def process_file(conn, path, statinfo):
-    logger = logging.getLogger(__name__)
-
-    file_size = statinfo.st_size
-    if file_size > FILE_SIZE_THRESHOLD:
-        logger.warning(f'process_file({os.getpid()}): skipping too-big file: {path}')
-        return
-
-    if skip_known_files:
-        file_id = fetch_file_id(conn, path)
-        if file_id:
-            logger.info(f'process_file({os.getpid()}): file already in db, skipping...: {file_id}')
-            return
-
-    logger.info(f'process_file({os.getpid()}): upserting file of size {file_size}: {path}')
-
-    logger.debug(f'process_file({os.getpid()}): hashing file...')
-    hash = hasher.hash_file(path)
-    logger.debug(f'process_file({os.getpid()}): hashing complete.')
-
-    mimetype = mime.from_file(path)
-    logger.debug(f'process_file({os.getpid()}): mimetype is {mimetype}')
-
-    # upsert file
-    file_id = upsert_file(conn, path, statinfo, hash, mimetype)
-    logger.info(f'process_file({os.getpid()}): upserted file: {file_id}')
-
-    image_id = None
-    if (mimetype.split('/'))[0] == 'image':
-        image_id = process_image(conn, path, file_id, mimetype)
-    #else:
-    #    logger.info(f'process_file({os.getpid()}): skipping file: {path} ({mimetype})')
 
 def scan(workq, idle_worker_count, log_dir):
     pid = os.getpid()
@@ -476,12 +483,11 @@ def scan(workq, idle_worker_count, log_dir):
     )
     logger = logging.getLogger(__name__)
 
-    #sys.excepthook = exception_handler
-
-    conn = None
+    fp = None
     error = None
     try:
-        conn = psycopg2.connect(**connection_parameters)
+        hasher = FileHash(hash_type)
+        fp = FileProcessor(connection_parameters, hasher)
 
         while True:
             if worker_count == 1:
@@ -514,7 +520,7 @@ def scan(workq, idle_worker_count, log_dir):
                 # is current item a file?
                 statinfo = os.stat(item)
                 if stat.S_ISREG(statinfo.st_mode):
-                    process_file(conn, item, statinfo)
+                    fp.process_file(item, statinfo, skip_known_files)
                 elif stat.S_ISDIR(statinfo.st_mode):
                     # a directory, scan it and queue the interesting entries
                     for entry in os.scandir(item):
@@ -549,12 +555,14 @@ def scan(workq, idle_worker_count, log_dir):
                     idle_worker_count.value += 1
 
         logger.info(f'scan({pid}): scan: at end of loop, workq is {workq.qsize()}, empty = {workq.empty()}')
+    except TimeToQuitException:
+        logger.info(f'scan({pid}): time to quit, getting idle lock')
+        with idle_worker_count.get_lock():
+            idle_worker_count.value += 1
+        logger.info(f'scan({pid}): idled and exiting...')
     except BaseException as error:
         #logger.exception(f'scan({pid}): {error}')
         logger.exception(error)
-
-        if conn:
-            conn.rollback()
 
         logger.info(f'scan({pid}): getting idle lock')
         with idle_worker_count.get_lock():
@@ -563,8 +571,6 @@ def scan(workq, idle_worker_count, log_dir):
         raise
     finally:
         workq.close()
-        if(conn):
-            conn.close()
 
 def usage(exit_code, errmsg=None):
     if errmsg:
@@ -640,15 +646,13 @@ if __name__ == '__main__':
 
     if worker_count == 1:
         # configure parent logging
-        log_file = os.path.join(log_dir, f'MAIN')
+        log_file = os.path.join(log_dir, f'main')
         logging.basicConfig(
             filename=log_file,
             level=logging.DEBUG,
             format=LOG_FORMAT
         )
         logger = logging.getLogger(__name__)
-
-        #sys.excepthook = exception_handler
 
         logger.info(f'main({pid}): starting...')
 
@@ -658,15 +662,13 @@ if __name__ == '__main__':
             time.sleep(2)
 
             # configure parent logging
-            log_file = os.path.join(log_dir, f'MAIN')
+            log_file = os.path.join(log_dir, f'main')
             logging.basicConfig(
                 filename=log_file,
                 level=logging.DEBUG,
                 format=LOG_FORMAT
             )
             logger = logging.getLogger(__name__)
-
-            #sys.excepthook = exception_handler
 
             logger.info(f'main({pid}): starting...')
 
