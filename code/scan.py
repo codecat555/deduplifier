@@ -27,6 +27,8 @@ import re
 
 import magic
 
+import pickle
+
 # from package Pillow
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 2000000000
@@ -223,7 +225,14 @@ class FileProcessor:
 
         agent_id = self.pid
 
-        mime_type, mime_subtype, *junk = mimetype.split('/')
+        result = None
+
+        try:
+            mime_type, mime_subtype, *junk = mimetype.split('/')
+        except ValueError as error:
+            logger.exception(error)
+            return result
+
         if len(junk) > 0:
             logger.warning(f'upsert_file({self.pid}): mimetype has more than two components, ignoring the remainder')
 
@@ -247,7 +256,6 @@ class FileProcessor:
         ]
         logger.info(f"upsert_file({self.pid}) args: {[str(arg) for arg in args]}")
 
-        result = None
         try:
             with self.conn.cursor() as cursor:
                 cursor.callproc('upsert_file', args)
@@ -289,7 +297,8 @@ class FileProcessor:
             )
             result = completed_process.stdout.rstrip()
         elif platform.system() == 'Windows':
-            command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{shlex.quote(path)}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
+            path = re.sub(r"'", r"''", path)
+            command_string = f"$driveLetter = [System.IO.Path]::GetPathRoot('{path}').Split(':')[0]; (Get-Partition -DriveLetter $driveLetter).Guid"
             completed_process = subprocess.run(
                 [r'powershell.exe', r'-Command', command_string],
                 check=True,
@@ -306,7 +315,7 @@ class FileProcessor:
 
     def get_tags(self, path, image):
         logger = logging.getLogger(__name__)
-        logger.debug(f'get_tags({self.pid}): starting...')
+        logger.info(f'get_tags({self.pid}): starting...')
         tags = {}
         exifdata = image.getexif()
 
@@ -483,6 +492,8 @@ def scan(workq, idle_worker_count, log_dir):
     )
     logger = logging.getLogger(__name__)
 
+    logger.info(f'scan({pid}): starting...')
+
     fp = None
     error = None
     try:
@@ -490,6 +501,7 @@ def scan(workq, idle_worker_count, log_dir):
         fp = FileProcessor(connection_parameters, hasher)
 
         while True:
+            # special, single-threaded, case
             if worker_count == 1:
                 if workq.qsize() == 0:
                     logger.info(f'scan({pid}): single-threaded and work queue is empty, quitting...')
@@ -505,7 +517,11 @@ def scan(workq, idle_worker_count, log_dir):
                     break
 
             logger.info(f'scan({pid}): fetching new item...')
-            item = workq.get()
+            try:
+                item = workq.get()
+            except AttributeError as error:
+                logger.debug(f'scan({pid}): workq: {workq} ({type(workq)}, {dir(workq)}')
+                raise
 
             if item is None:
                 logger.info(f'scan({pid}): found end-of-queue, quitting...')
@@ -550,6 +566,9 @@ def scan(workq, idle_worker_count, log_dir):
             except ExcludedFile:
                 # nothing to do, just continue (with finally block)
                 pass
+            except PermissionError as error:
+                # log it and continue
+                logger.exception(error)
             finally:
                 with idle_worker_count.get_lock():
                     idle_worker_count.value += 1
@@ -584,24 +603,60 @@ class TimeToQuitException(Exception):
 # a shared queue that can be interrupted
 class InterruptibleQueue(mpq.Queue):
     def __init__(self, *args, **kwargs):
+        #print(f'InterruptibleQueue::__init__({os.getpid()}): here')
         super().__init__(*args, **kwargs, ctx=mp.get_context())
-        self.quitting_time = False
+        self._quitting_time = False
 
     def get(self, *args, **kwargs):
         if self.quitting_time:
             raise TimeToQuitException()
-        return super().get(*args, **kwargs)
+        item = super().get(*args, **kwargs)
+        #print(f'InterruptibleQueue::get({os.getpid()}): returning {item}')
+        return item
 
     def put(self, *args, **kwargs):
         if self.quitting_time:
             raise TimeToQuitException()
+        #print(f'InterruptibleQueue::put({os.getpid()}): {args, kwargs}')
         super().put(*args, **kwargs)
 
+    @property
+    def quitting_time(self):
+        return self._quitting_time
+
+    @quitting_time.setter
+    def quitting_time(self, val):
+        self._quitting_time = val
+
     def time_to_quit(self):
-        self.quitting_time = True
+        self.quitting_time(True)
         # drain the queue
         while self.qsize() > 0:
             super().get()
+
+    def __getstate__(self):
+        #print(f'pickling in progress...{self.__dict__}')
+        #print(f'super dict...{super().__dict__}')
+        #retval = mpq.Queue.__getstate__(self) + (self._quitting_time,)
+        # https://stackoverflow.com/questions/52278349/subclassing-multiprocessing-queue-queue-attributes-set-by-parent-not-available
+        retval = (self._ignore_epipe, self._maxsize, self._reader, self._writer,
+                        self._rlock, self._wlock, self._sem, self._opid,
+                                        self._quitting_time)  
+        print(f'returning {retval}')
+        return retval
+
+    def __setstate__(self, state):
+        print('unpickling in progress...')
+        #parent_state = state[:-1]
+        #print(f'parent state is {parent_state}')
+        #mpq.Queue.__setstate__(self, parent_state)
+        #print(f'my state is {state[-1:]}')
+        #self._quitting_time = state[-1:]
+        # https://stackoverflow.com/questions/52278349/subclassing-multiprocessing-queue-queue-attributes-set-by-parent-not-available
+        (self._ignore_epipe, self._maxsize, self._reader, self._writer,
+                 self._rlock, self._wlock, self._sem, self._opid,
+                          self._quitting_time) = state
+        self._after_fork()
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
@@ -620,8 +675,12 @@ if __name__ == '__main__':
     if worker_count < 1:
         usage(3, 'worker count must be a non-zero positive integer')
 
+    # do this before any other mp stuff
+    mp.set_start_method('spawn')
+
     # create the work queue
     workq = InterruptibleQueue()
+    #workq = mpq.Queue(ctx=mp.get_context())
     idle_worker_count = mp.Value('i', worker_count)
 
     # prime the work queue with the list of target directories
@@ -629,8 +688,8 @@ if __name__ == '__main__':
         workq.put(os.path.abspath(path))
 
     log_dir = os.path.join(
-        #os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0]))),
-        '/extra/me',
+        os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0]))),
+        #'/extra/me',
         'log',
         platform.node(),
         time.strftime('%Y-%m-%d-%H-%M-%S'),
@@ -659,7 +718,7 @@ if __name__ == '__main__':
         scan(workq, idle_worker_count, log_dir)
     else:
         with mp.Pool(worker_count, scan, (workq, idle_worker_count, log_dir)) as pool:
-            time.sleep(2)
+            time.sleep(10)
 
             # configure parent logging
             log_file = os.path.join(log_dir, f'main')
@@ -726,7 +785,8 @@ if __name__ == '__main__':
                         idle_iterations = 0
 
                         logger.info(f'main({pid}): sleeping...')
-                        time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
+
+                    time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
             except BaseException as error:
                 logger.exception(error)
                 pool.terminate()
