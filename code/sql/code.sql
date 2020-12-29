@@ -33,8 +33,8 @@ BEGIN
 
     v_path_id := upsert_path(dirpath_in, sepchar_in);
 
-    --INSERT INTO location VALUES(DEFAULT, v_host_id, v_drive_id, v_volume_id, v_path_id) ON CONFLICT (host_id, drive_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
-    INSERT INTO location VALUES(DEFAULT, v_host_id, v_volume_id, v_path_id) ON CONFLICT (host_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
+    --INSERT INTO location VALUES(DEFAULT, v_host_id, v_drive_id, v_volume_id, v_path_id, sepchar_in) ON CONFLICT (host_id, drive_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
+    INSERT INTO location VALUES(DEFAULT, v_host_id, v_volume_id, v_path_id, sepchar_in) ON CONFLICT (host_id, volume_id, path_id) DO UPDATE SET host_id = EXCLUDED.host_id RETURNING id INTO v_location_id;
 
     INSERT INTO file VALUES(DEFAULT, v_location_id, filename_in, mime_type_in, mime_subtype_in, size_in_bytes_in, checksum_in, checksum_type_in, create_date_in, modify_date_in, access_date_in, discover_date_in, agent_pid_in)  ON CONFLICT (location_id, name) DO UPDATE SET location_id = EXCLUDED.location_id RETURNING id INTO v_file_id;
 
@@ -131,15 +131,15 @@ BEGIN
             -- do this in a subsequent loop...to avoid deadlocks (
             --INSERT INTO image_tag VALUES(tag_id, img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET exif_tag_id = EXCLUDED.exif_tag_id;
             -- might try this, instead...
-            --INSERT INTO image_tag VALUES(tag_id, img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET image_id = EXCLUDED.image_id;
+            INSERT INTO image_tag VALUES(tag_id, img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET image_id = EXCLUDED.image_id;
 
             retval = array_append(retval, tag_id);
         END LOOP;
-        FOR i IN 1 .. array_upper(tag_list, 1)
-        LOOP
-            -- try this here, first
-            INSERT INTO image_tag VALUES(retval[i], img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET image_id = EXCLUDED.image_id;
-        END LOOP;
+        --FOR i IN 1 .. array_upper(tag_list, 1)
+        --LOOP
+        --    -- try this here, first
+        --    INSERT INTO image_tag VALUES(retval[i], img_id, tag_list[i].tag_value) ON CONFLICT (exif_tag_id, image_id) DO UPDATE SET image_id = EXCLUDED.image_id;
+        --END LOOP;
     END IF;
 
     RETURN retval;

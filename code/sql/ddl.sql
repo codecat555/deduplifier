@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS location (
 --    drive_id INTEGER NOT NULL,
     volume_id INTEGER NOT NULL,
     path_id INTEGER NOT NULL,
+    sepchar text,
     PRIMARY KEY(id),
     CONSTRAINT fk_host FOREIGN KEY(host_id) REFERENCES host(id),
 --    CONSTRAINT fk_drive FOREIGN KEY(drive_id) REFERENCES drive(id),
@@ -103,7 +104,8 @@ CREATE TABLE IF NOT EXISTS image_tag (
     UNIQUE(exif_tag_id, image_id)
 );
 
-CREATE MATERIALIZED VIEW paths AS
+DROP MATERIALIZED VIEW IF EXISTS paths_old;
+CREATE MATERIALIZED VIEW paths_old AS
 WITH RECURSIVE allpaths AS (
     SELECT id, name AS fullpath FROM path WHERE id = 0
     UNION ALL
@@ -111,6 +113,26 @@ WITH RECURSIVE allpaths AS (
     JOIN allpaths parent ON parent.id = child.parent_path_id
 )
 SELECT * FROM allpaths;
+
+DROP MATERIALIZED VIEW IF EXISTS paths;
+CREATE MATERIALIZED VIEW paths AS
+WITH RECURSIVE
+loc as (
+    select id,path_id,sepchar from location
+),
+allpaths AS (
+    SELECT p.id, p.parent_path_id, p.name AS fullpath, l.sepchar FROM path p
+    JOIN loc l ON l.path_id = p.id
+    UNION ALL
+    SELECT child.id, parent.parent_path_id, concat_ws(child.sepchar, parent.name, child.fullpath) AS fullpath, child.sepchar FROM path parent
+    JOIN allpaths child ON parent.id = child.parent_path_id
+)
+SELECT id,
+    CASE
+    WHEN sepchar = '/' THEN sepchar || fullpath
+    ELSE fullpath
+    END
+FROM allpaths where parent_path_id = 0;
 
 -- describe tables, views and sequences
 \d
