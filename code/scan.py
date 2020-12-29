@@ -73,14 +73,6 @@ EXCLUDE_REGEX = []
 for p in EXCLUDE_PATTERNS:
     EXCLUDE_REGEX.append(re.compile(p))
 
-#worker_count = 0
-
-#skip_known_files = False
-
-#abort_path = None
-
-#logger = None
-
 hash_type = 'sha256'
 
 class InternalError(Exception):
@@ -511,26 +503,20 @@ def scan(workq, idle_worker_count, log_dir, skip_known_files, worker_count, abor
                     logger.info(f'scan({pid}): single-threaded and work queue is empty, quitting...')
                     break
 
-                try:
-                    os.stat(abort_path)
-                except FileNotFoundError:
-                    pass
-                else:
-                    #raise FoundExitFlag()
-                    logger.debug(f'scan({pid}): found exit request file, quitting...')
-                    break
+            try:
+                os.stat(abort_path)
+            except FileNotFoundError:
+                pass
+            else:
+                #raise FoundExitFlag()
+                logger.debug(f'scan({pid}): found exit request file, quitting...')
+                break
 
             logger.info(f'scan({pid}): fetching new item...')
-            logger.info(f'scan({pid}): quitting time is {workq._quitting_time}...')
             item = workq.get()
 
             if item is None:
                 logger.info(f'scan({pid}): found end-of-queue, quitting...')
-                break
-            elif item == -1:
-                logger.info(f'scan({pid}): found time-to-quit, quitting...')
-                time.sleep(1)
-                raise TimeToQuitException1()
                 break
 
             logger.info(f"scan({pid}): dequeued item '{item}'")
@@ -577,11 +563,6 @@ def scan(workq, idle_worker_count, log_dir, skip_known_files, worker_count, abor
                     idle_worker_count.value += 1
 
         logger.info(f'scan({pid}): scan: at end of loop, workq is {workq.qsize()}, empty = {workq.empty()}')
-
-    except TimeToQuitException as error:
-        logger.exception(error)
-        logger.info(f'scan({pid}): time to quit, idled and exiting...')
-        time.sleep(2)
     finally:
         #workq.close()
         pass
@@ -591,62 +572,6 @@ def usage(exit_code, errmsg=None):
         logger.info('Error: ' + errmsg, file=sys.stderr)
     logger.info(f'usage: {sys.argv[0]} [-skip_known_files] <worker-count> <target-directory>[,<target-directory>...]', file=sys.stderr)
     exit(exit_code)
-
-class TimeToQuitException(Exception):
-    pass
-
-class TimeToQuitException1(Exception):
-    pass
-
-# a shared queue that can be interrupted
-class InterruptibleQueue(mpq.Queue):
-    def __init__(self, *args, **kwargs):
-        #print(f'InterruptibleQueue::__init__({os.getpid()}): here')
-        super().__init__(*args, **kwargs, ctx=mp.get_context())
-        self._quitting_time = False
-
-    def get(self, *args, **kwargs):
-        if self._quitting_time:
-            print(f'InterruptibleQueue::get({os.getpid()}): raising TimeToQuitException')
-            #raise TimeToQuitException()
-            return -1
-        item = super().get(*args, **kwargs)
-        #print(f'InterruptibleQueue::get({os.getpid()}): returning {item}')
-        return item
-
-    def put(self, *args, **kwargs):
-        if self._quitting_time:
-            #raise TimeToQuitException()
-            return
-        #print(f'InterruptibleQueue::put({os.getpid()}): {args, kwargs}')
-        super().put(*args, **kwargs)
-
-#    @property
-#    def quitting_time(self):
-#        return self._quitting_time
-#
-#    @quitting_time.setter
-#    def quitting_time(self, val):
-#        self._quitting_time = val
-
-    def time_to_quit(self):
-        print(f'{time.asctime()} InterruptibleQueue::get({os.getpid()}): TIME TO QUIT')
-        #self.quitting_time(True)
-        self._quitting_time = True
-
-    def __getstate__(self):
-        # https://stackoverflow.com/questions/52278349/subclassing-multiprocessing-queue-queue-attributes-set-by-parent-not-available
-        retval = (self._ignore_epipe, self._maxsize, self._reader, self._writer,
-                        self._rlock, self._wlock, self._sem, self._opid,
-                                        self._quitting_time)  
-        return retval
-
-    def __setstate__(self, state):
-        # https://stackoverflow.com/questions/52278349/subclassing-multiprocessing-queue-queue-attributes-set-by-parent-not-available
-        (self._ignore_epipe, self._maxsize, self._reader, self._writer,
-                 self._rlock, self._wlock, self._sem, self._opid,
-                          self._quitting_time) = state
-        self._after_fork()
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
@@ -670,8 +595,7 @@ if __name__ == '__main__':
     mp.set_start_method('spawn')
 
     # create the work queue
-    workq = InterruptibleQueue()
-    #workq = mpq.Queue(ctx=mp.get_context())
+    workq = mpq.Queue(ctx=mp.get_context())
     idle_worker_count = mp.Value('i', worker_count)
 
     # prime the work queue with the list of target directories
@@ -709,8 +633,6 @@ if __name__ == '__main__':
         scan(workq, idle_worker_count, log_dir, skip_known_files, worker_count, abort_path, hash_type)
     else:
         with mp.Pool(worker_count, scan, (workq, idle_worker_count, log_dir, skip_known_files, worker_count, abort_path, hash_type)) as pool:
-            #time.sleep(10)
-
             # configure parent logging
             log_file = os.path.join(log_dir, f'main')
             logging.basicConfig(
@@ -721,11 +643,13 @@ if __name__ == '__main__':
             logger = logging.getLogger(__name__)
 
             logger.info(f'main({pid}): starting...')
-            while mp.active_children() == 0:
+            while True:
+                active_count = len(mp.active_children())
+                if active_count > 0:
+                    break
+                logger.info(f'main({pid}): startup - active count is {active_count}, waiting...')
                 time.sleep(1)
             time.sleep(2)
-            #STARTUP_WAIT_TIME = 20
-            #time.sleep(STARTUP_WAIT_TIME)
 
             try:
                 hang_detected = False
@@ -738,7 +662,6 @@ if __name__ == '__main__':
                     except FileNotFoundError:
                         pass
                     else:
-                        workq.time_to_quit()
                         msg = f'NOTICE: found exit request file, quitting in {QUEUE_DRAIN_WAIT_TIME} seconds...'
                         logger.info(msg)
                         print(msg)
@@ -784,7 +707,7 @@ if __name__ == '__main__':
 
                         logger.info(f'main({pid}): sleeping...')
 
-                    #time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
+                    time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
             except BaseException as error:
                 logger.exception(error)
                 pool.terminate()
