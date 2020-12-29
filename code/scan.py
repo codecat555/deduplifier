@@ -578,6 +578,8 @@ if __name__ == '__main__':
         usage(1)
 
     first_arg_idx = 1
+
+    skip_known_files = False
     if '-skip-known-files' in sys.argv:
         skip_known_files = True
         first_arg_idx = 2
