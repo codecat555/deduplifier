@@ -28,16 +28,43 @@ services:
     working_dir: ___APP_PATH___
     restart: always
     volumes:
-        # cannot use remote filesystem for db files, because sshfs freezes for some reason. so,
-        # we don't mount the APP_PATH but just the CODE_PATH.
-        #- ___APP_PATH___:___APP_PATH___
-        - ___CODE_PATH___:___CODE_PATH___
-        - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
-        - /etc/localtime:/etc/localtime:ro
-        - /etc/timezone:/etc/timezone:ro
+      #- ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      #- /etc/localtime:/etc/localtime:ro
+      #- /etc/timezone:/etc/timezone:ro
+      ## cannot use remote filesystem for db files, because sshfs freezes for some reason. so,
+      ## we don't mount the APP_PATH but just the CODE_PATH.
+      ##- ___APP_PATH___:___APP_PATH___
+      #- ___CODE_PATH___:___CODE_PATH___
+      #- type: bind
+      #  source: ___APP_PATH___
+      #  target: ___APP_PATH___
+      #  volume:
+      #    nocopy: true
+      - type: bind
+        source: ___CODE_PATH___
+        target: ___CODE_PATH___
+        volume:
+          nocopy: true
+      - type: bind
+        source: ./sql/init.sql
+        target: /docker-entrypoint-initdb.d/init.sql
+        volume:
+          nocopy: true
+      - type: bind
+        source: /etc/localtime
+        target: /etc/localtime
+        read_only: true
+        volume:
+          nocopy: true
+      - type: bind
+        source: /etc/timezone
+        target: /etc/timezone
+        read_only: true
+        volume:
+          nocopy: true
     build:
-        context: .
-        dockerfile: db-Dockerfile
+      context: .
+      dockerfile: db-Dockerfile
     environment:
       - TZ=___TIMEZONE___
       - PGDATA=___DB_PATH___
