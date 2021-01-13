@@ -167,3 +167,36 @@ BEGIN
 
     RETURN v_file_id;
 END $$;
+
+--DO $$ BEGIN
+--    CREATE TYPE count_type AS (
+--        count_name text,
+--        count_value integer
+--    );
+--EXCEPTION
+--    WHEN duplicate_object THEN null;
+--END $$;
+--
+--CREATE OR REPLACE FUNCTION get_counts1()
+--RETURNS count_type[] LANGUAGE plpgsql AS $$
+--DECLARE
+--    v_file_count count_type;
+--    --v_counts integer[];
+--BEGIN
+--    --v_counts = array_append(v_counts, tag_id);
+--    --SELECT count(*) FROM file f INTO v_counts[0];
+--    SELECT 'file',count(*) FROM file f INTO v_file_count;
+--
+--    RETURN ARRAY[v_file_count];
+--END $$;
+
+CREATE OR REPLACE FUNCTION get_counts()
+RETURNS integer[] LANGUAGE plpgsql AS $$
+DECLARE
+    v_file_count integer;
+BEGIN
+    SELECT count(*) FROM file f INTO v_file_count;
+
+    RETURN ARRAY[v_file_count];
+END $$;
+

@@ -1,7 +1,9 @@
-FROM python:3.7-alpine
-ENV FLASK_APP=app.py
+FROM python:3.7
+ENV FLASK_APP=web/app.py
 ENV FLASK_RUN_HOST=0.0.0.0
-RUN apk add tzdata gcc musl-dev linux-headers postgresql-client
+ENV FLASK_ENV=development
+RUN apt-get update && apt-get upgrade -y
+RUN apt install -y tzdata gcc musl postgresql-client
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 EXPOSE ___WEB_EXTERNAL_PORT___
