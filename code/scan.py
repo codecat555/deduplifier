@@ -103,7 +103,7 @@ class FileProcessor:
         args = [
             img_id,
             # sort keys here to help prevent db deadlocks
-            [(key, value) for key,value in sorted(tags.items(), key=lambda x: x[0])]
+            [(key, value) for key,value in sorted(tags.items(), key=lambda x: str(x[0]))]
         ]
         logger.info(f"upsert_image_tags({self.pid}) args: {[str(arg) for arg in args]}")
 
@@ -597,7 +597,7 @@ if __name__ == '__main__':
     mp.set_start_method('spawn')
 
     # create the work queue
-    workq = mpq.Queue(ctx=mp.get_context())
+    workq = mpq.Queue(ctx=mp.get_context('spawn'))
     idle_worker_count = mp.Value('i', worker_count)
 
     # prime the work queue with the list of target directories
@@ -647,11 +647,12 @@ if __name__ == '__main__':
             logger.info(f'main({pid}): starting...')
             while True:
                 active_count = len(mp.active_children())
-                if active_count > 0:
+                logger.info(f'main({pid}): startup - active count is {active_count}')
+                #if active_count > (worker_count/2):
+                if active_count >= worker_count:
                     break
-                logger.info(f'main({pid}): startup - active count is {active_count}, waiting...')
                 time.sleep(1)
-            time.sleep(2)
+            time.sleep(30)
 
             try:
                 hang_detected = False
@@ -674,6 +675,8 @@ if __name__ == '__main__':
 
                     if (idle_worker_count.value > worker_count):
                         logger.warning(f'main({pid}): idle_worker_count is too big! (fix the bug)')
+                    if (idle_worker_count.value < 0):
+                        logger.warning(f'main({pid}): idle_worker_count is too small! (fix the bug)')
 
                     if (idle_worker_count.value >= worker_count):
                         idle_iterations += 1
@@ -704,6 +707,9 @@ if __name__ == '__main__':
                             logger.debug(f'main({pid}): shutting down 2 (qsize is {workq.qsize()})...')
 
                             break
+                        else:
+                            # pause a bit, to give children time to settle between loops...
+                            time.sleep(2)
                     else:
                         idle_iterations = 0
 
