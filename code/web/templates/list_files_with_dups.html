@@ -1,0 +1,50 @@
+<!-- Based on example here: https://hackersandslackers.com/flask-jinja-templates -->
+{% extends 'layout.html' %}
+
+{% block content %}
+    <div class="container">
+        <h1>{{title}}</h1>
+        <p>{{description}}</p>
+    </div>
+
+<!-- Based on example here: https://kanchanardj.medium.com/how-to-display-database-content-in-your-flask-website-8a62492ba892 -->
+
+    <table>
+      <tbody>
+        <tr>
+          <td>Requested row start index: {{ start_idx }}</td>
+        </tr>
+        <tr>
+          <td>Result row count: {{ rows_per_page }}</td>
+        </tr>
+        <tr>
+          <td>Actual row count: {{ row_count }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <table>
+      <colgroup>
+        <col style="width: 18%" />
+        <col style="width: 18%" />
+        <col style="width: 74%" />
+      </colgroup>
+      <thead>
+        <tr>
+            <th>#</th>
+            <th>Duplicates</th>
+            <th>File Name</th>
+        </tr>
+      </thead>    
+      <tbody>
+        {% for row in files %}    
+            <tr>
+                <td style="text-align:right">{{loop.index}}</td>
+                <td style="text-align:right">{{row[0]}}</td>
+                <td>{{row[1]}}</td>
+            </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+{% endblock %}
