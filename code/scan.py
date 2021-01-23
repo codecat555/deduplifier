@@ -35,6 +35,10 @@ from PIL.ExifTags import TAGS, GPSTAGS
 
 import psycopg2
 from psycopg2 import Error
+
+# prepend current directory to select local db_config module
+sys.path = [ '.', *sys.path ]
+
 from db_config import connection_parameters
 
 #import imagehash
@@ -569,8 +573,8 @@ def scan(workq, idle_worker_count, log_dir, skip_known_files, worker_count, abor
 
 def usage(exit_code, errmsg=None):
     if errmsg:
-        logger.info('Error: ' + errmsg, file=sys.stderr)
-    logger.info(f'usage: {sys.argv[0]} [-skip_known_files] <worker-count> <target-directory>[,<target-directory>...]', file=sys.stderr)
+        print('Error: ' + errmsg, file=sys.stderr)
+    print(f'usage: {sys.argv[0]} [-skip_known_files] <worker-count> <target-directory>[,<target-directory>...]', file=sys.stderr)
     exit(exit_code)
 
 if __name__ == '__main__':
@@ -630,7 +634,8 @@ if __name__ == '__main__':
         )
         logger = logging.getLogger(__name__)
 
-        logger.info(f'main({pid}): starting...')
+        dbname = connection_parameters['database']
+        logger.info(f'main({pid}): starting...using db "{dbname}"')
 
         scan(workq, idle_worker_count, log_dir, skip_known_files, worker_count, abort_path, hash_type)
     else:
