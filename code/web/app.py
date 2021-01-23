@@ -13,6 +13,8 @@ app = Flask(__name__)
 
 import psycopg2
 from psycopg2 import Error
+import psycopg2.extras
+
 #from db_config import connection_parameters
 connection_parameters = dict(
     user = "postgres",
@@ -58,6 +60,27 @@ class app_db:
 
         return result
 
+    def list_files_with_dups(self, start_idx=1, rows_per_page=20):
+        if not self.conn:
+            self.conn = psycopg2.connect(**self.connection_parameters)
+
+        try:
+            with self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
+                cursor.callproc('files_with_dups', [ start_idx, rows_per_page ])
+                result = cursor.fetchall()
+        finally:
+            self.conn.rollback()
+
+        return render_template(
+            'list_files_with_dups.html',
+            title='Duplicate Files',
+            description='List of Known Files with counts of duplicates',
+            start_idx=start_idx,
+            rows_per_page=rows_per_page,
+            row_count=len(result),
+            files=result
+        )
+
 def get_hit_count():
     retries = 5
     while True:
@@ -84,6 +107,11 @@ def welcome():
     #count = get_hit_count() + 100
     #return 'Hello World! I have been seen {} times.\n'.format(count)
     return db.welcome()
+
+@app.route('/files_with_dups')
+def files_with_dups():
+    db = app_db(connection_parameters)
+    return db.list_files_with_dups()
 
 @app.route('/hello')
 def hello():

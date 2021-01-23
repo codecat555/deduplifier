@@ -200,3 +200,58 @@ BEGIN
     RETURN ARRAY[v_file_count];
 END $$;
 
+DO $$ BEGIN
+    CREATE TYPE files_with_dups_type AS (
+        dup_count bigint,
+        name text
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE OR REPLACE FUNCTION files_with_dups
+(
+    offset_in integer,
+    limit_in integer
+)
+--RETURNS files_with_dups_type[] LANGUAGE plpgsql AS $$
+RETURNS SETOF files_with_dups_type LANGUAGE plpgsql AS $$
+--DECLARE
+--    v_files files_with_dups_type[];
+BEGIN
+    raise notice 'files_with_dups: offset=%, limit=%', offset_in, limit_in;
+
+    RETURN QUERY
+        SELECT COUNT(*) "count", MIN(f.name) "name"
+        --INTO v_files
+        FROM file f
+        JOIN location l ON f.location_id = l.id
+        GROUP BY f.name, f.checksum
+        --HAVING COUNT(*) > 2
+        ORDER BY f.name OFFSET offset_in LIMIT limit_in
+    ;
+
+--    RETURN v_files;
+END $$;
+
+CREATE OR REPLACE FUNCTION path_from_file_id
+(
+    id_in integer
+)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_res text;
+BEGIN
+    raise notice 'path_from_id: id_in=%', id_in;
+
+    select ps.fullpath || l.sepchar || f.name as name from file f
+    join location l on f.location_id = l.id
+    join path p on l.path_id = p.id
+    join paths ps on p.id = ps.id
+    where f.id = id_in
+    into v_res
+    ;
+
+--    RETURN v_res;
+END $$;
+

@@ -3,9 +3,10 @@
 -- multipass exec deduplifier-host -- docker exec -it deduplifier_db_1 su - postgres -c 'psql -d deduplifier -h localhost -p 3368 -f /app/code/sql/init.sql'
 --
 
-DROP DATABASE IF EXISTS deduplifier;
-CREATE DATABASE deduplifier;
-\connect deduplifier;
+-- remove this stuff so this script can be run against more than one db (e.g. dd_test0)
+--DROP DATABASE IF EXISTS deduplifier;
+--CREATE DATABASE deduplifier;
+--\connect deduplifier;
 
 CREATE TABLE IF NOT EXISTS host (
     id INTEGER GENERATED ALWAYS AS IDENTITY,
@@ -121,18 +122,114 @@ loc as (
     select id,path_id,sepchar from location
 ),
 allpaths AS (
-    SELECT p.id, p.parent_path_id, p.name AS fullpath, l.sepchar FROM path p
+    SELECT p.id, p.parent_path_id, p.name AS fullpath, l.sepchar
+    FROM path p
     JOIN loc l ON l.path_id = p.id
     UNION ALL
     SELECT child.id, parent.parent_path_id, concat_ws(child.sepchar, parent.name, child.fullpath) AS fullpath, child.sepchar FROM path parent
     JOIN allpaths child ON parent.id = child.parent_path_id
 )
-SELECT id,
+SELECT id path_id,
     CASE
     WHEN sepchar = '/' THEN sepchar || fullpath
     ELSE fullpath
     END
 FROM allpaths where parent_path_id = 0;
+
+-- this view considers only leaf path nodes, i.e. those that have
+-- no children. note that this is not the same as the set of nodes
+-- which are referenced by the location table...because some path
+-- nodes (many of them, in fact) refer to directories which contain
+-- both files and sub-directories.
+DROP MATERIALIZED VIEW IF EXISTS dup_groups_for_leaves;
+CREATE MATERIALIZED VIEW dup_groups_for_leaves AS
+SELECT array_agg(f.id) file_ids
+FROM file f
+JOIN location l ON f.location_id = l.id
+JOIN path p on l.path_id = p.id
+WHERE p.id IN (
+    -- this sub-query is the mechanism for selecting just leaf path nodes.
+    select p1.id from path p1
+    left outer join path p2
+    on p1.id = p2.parent_path_id
+    where p2.parent_path_id IS NULL
+)
+GROUP BY (f.checksum)
+;
+
+DROP MATERIALIZED VIEW IF EXISTS dup_counts;
+CREATE MATERIALIZED VIEW dup_counts AS
+WITH RECURSIVE
+dup_groups_for_all AS (
+    SELECT array_agg(f.id) file_ids
+    FROM file f
+    JOIN location l ON f.location_id = l.id
+    JOIN path p on l.path_id = p.id
+    GROUP BY (f.checksum)
+),
+unique_files AS (
+    SELECT file_ids FROM dup_groups_for_all
+    WHERE ARRAY_LENGTH(file_ids, 1) = 1
+),
+duplicate_files as (
+    SELECT file_ids FROM dup_groups_for_all
+    WHERE ARRAY_LENGTH(file_ids, 1) > 1
+),
+unique_file_count AS (
+    SELECT p.id, COUNT(*)
+    FROM file f
+    JOIN location l ON f.location_id = l.id
+    JOIN path p ON l.path_id = p.id
+    WHERE f.id = ANY(SELECT unnest(file_ids) from unique_files)
+    GROUP BY (p.id)
+),
+duplicate_file_count AS (
+    SELECT p.id, COUNT(*)
+    FROM file f
+    JOIN location l ON f.location_id = l.id
+    JOIN path p ON l.path_id = p.id
+    WHERE f.id = ANY(SELECT unnest(file_ids) from duplicate_files)
+    GROUP BY (p.id)
+),
+file_dirs_with_totals AS (
+    SELECT p.id path_id, p.parent_path_id, ufc.count unique_count, dfc.count duplicate_count
+    FROM path p
+    JOIN unique_file_count ufc ON p.id = ufc.id
+    JOIN duplicate_file_count dfc ON p.id = dfc.id
+),
+dir_totals AS (
+    SELECT * FROM file_dirs_with_totals fdwt
+    UNION ALL
+    SELECT p.id path_id, p.parent_path_id, dt.unique_count unique_count, dt.duplicate_count duplicate_count
+    FROM path p
+    JOIN dir_totals dt ON p.id = dt.parent_path_id
+)
+--SELECT *
+--FROM dir_totals
+SELECT
+p.fullpath, SUM(dt.unique_count) unique_count, SUM(dt.duplicate_count) duplicate_count
+FROM dir_totals dt
+JOIN paths p ON p.path_id = dt.path_id
+GROUP BY (p.fullpath)
+ORDER BY length(p.fullpath) ASC
+;
+
+DROP MATERIALIZED VIEW IF EXISTS dup_detail;
+CREATE MATERIALIZED VIEW dup_detail AS
+WITH branch_nodes AS (
+    select f.id file_id, l.id location_id, p.id path_id, f.checksum from path p
+    join location l on p.id = l.path_id
+    join file f on l.id = f.location_id
+    where
+    p.id in (select path_id from location)
+),
+dups AS (
+    select checksum, count(*) from file group by checksum
+)
+select d.count dups, bn.* from branch_nodes bn
+join dups d using(checksum)
+order by bn.path_id asc
+;
 
 -- describe tables, views and sequences
 \d
