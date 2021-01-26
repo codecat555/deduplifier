@@ -55,10 +55,10 @@ CREATE TABLE IF NOT EXISTS location (
     path_id INTEGER NOT NULL,
     sepchar text,
     PRIMARY KEY(id),
-    CONSTRAINT fk_host FOREIGN KEY(host_id) REFERENCES host(id),
---    CONSTRAINT fk_drive FOREIGN KEY(drive_id) REFERENCES drive(id),
-    CONSTRAINT fk_volume FOREIGN KEY(volume_id) REFERENCES volume(id),
-    CONSTRAINT fk_path FOREIGN KEY(path_id) REFERENCES path(id),
+    CONSTRAINT fk_host FOREIGN KEY(host_id) REFERENCES host(id) ON DELETE CASCADE,
+--    CONSTRAINT fk_drive FOREIGN KEY(drive_id) REFERENCES drive(id) ON DELETE CASCADE,
+    CONSTRAINT fk_volume FOREIGN KEY(volume_id) REFERENCES volume(id) ON DELETE CASCADE,
+    CONSTRAINT fk_path FOREIGN KEY(path_id) REFERENCES path(id) ON DELETE CASCADE,
 --    UNIQUE(host_id, drive_id, volume_id, path_id)
     UNIQUE(host_id, volume_id, path_id)
 );
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS file (
     discover_date DATE NOT NULL,
     agent_pid INTEGER NOT NULL,
     PRIMARY KEY(id),
-    CONSTRAINT fk_location FOREIGN KEY(location_id) REFERENCES location(id),
+    CONSTRAINT fk_location FOREIGN KEY(location_id) REFERENCES location(id) ON DELETE CASCADE,
     UNIQUE(location_id, name)
 );
 
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS image (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     file_id INTEGER NOT NULL,
     --imagehash_fingerprint VARCHAR(1024) UNIQUE,
-    CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id),
+    CONSTRAINT fk_file FOREIGN KEY(file_id) REFERENCES file(id) ON DELETE CASCADE,
     --UNIQUE(file_id, imagehash_fingerprint)
     UNIQUE(file_id)
 );
@@ -100,20 +100,12 @@ CREATE TABLE IF NOT EXISTS image_tag (
     exif_tag_id INTEGER NOT NULL,
     image_id INTEGER NOT NULL,
     value TEXT NOT NULL,
-    CONSTRAINT fk_exif_tag FOREIGN KEY(exif_tag_id) REFERENCES exif_tag(id),
-    CONSTRAINT fk_image FOREIGN KEY(image_id) REFERENCES image(id),
+    CONSTRAINT fk_exif_tag FOREIGN KEY(exif_tag_id) REFERENCES exif_tag(id) ON DELETE CASCADE,
+    CONSTRAINT fk_image FOREIGN KEY(image_id) REFERENCES image(id) ON DELETE CASCADE,
     UNIQUE(exif_tag_id, image_id)
 );
 
-DROP MATERIALIZED VIEW IF EXISTS paths_old;
-CREATE MATERIALIZED VIEW paths_old AS
-WITH RECURSIVE allpaths AS (
-    SELECT id, name AS fullpath FROM path WHERE id = 0
-    UNION ALL
-    SELECT child.id, concat_ws('/', parent.fullpath, child.name) AS fullpath FROM path child
-    JOIN allpaths parent ON parent.id = child.parent_path_id
-)
-SELECT * FROM allpaths;
+--delete from file where id in (select f.id from file f join location l on f.location_id = l.id join path         p on l.path_id = p.id where p.id in (select path_id from paths where fullpath like '/mnt/ultra/backup/201602160-partial/me/AppData/%'));
 
 DROP MATERIALIZED VIEW IF EXISTS paths;
 CREATE MATERIALIZED VIEW paths AS
@@ -141,32 +133,25 @@ FROM allpaths where parent_path_id = 0;
 -- which are referenced by the location table...because some path
 -- nodes (many of them, in fact) refer to directories which contain
 -- both files and sub-directories.
-DROP MATERIALIZED VIEW IF EXISTS dup_groups_for_leaves;
-CREATE MATERIALIZED VIEW dup_groups_for_leaves AS
-SELECT array_agg(f.id) file_ids
+DROP MATERIALIZED VIEW IF EXISTS dup_groups_for_all;
+CREATE MATERIALIZED VIEW dup_groups_for_all AS
+SELECT checksum, array_agg(f.id) file_ids
 FROM file f
 JOIN location l ON f.location_id = l.id
 JOIN path p on l.path_id = p.id
-WHERE p.id IN (
-    -- this sub-query is the mechanism for selecting just leaf path nodes.
-    select p1.id from path p1
-    left outer join path p2
-    on p1.id = p2.parent_path_id
-    where p2.parent_path_id IS NULL
-)
 GROUP BY (f.checksum)
 ;
 
 DROP MATERIALIZED VIEW IF EXISTS dup_counts;
 CREATE MATERIALIZED VIEW dup_counts AS
 WITH RECURSIVE
-dup_groups_for_all AS (
-    SELECT array_agg(f.id) file_ids
-    FROM file f
-    JOIN location l ON f.location_id = l.id
-    JOIN path p on l.path_id = p.id
-    GROUP BY (f.checksum)
-),
+--dup_groups_for_all AS (
+--    SELECT array_agg(f.id) file_ids
+--    FROM file f
+--    JOIN location l ON f.location_id = l.id
+--    JOIN path p on l.path_id = p.id
+--    GROUP BY (f.checksum)
+--),
 unique_files AS (
     SELECT file_ids FROM dup_groups_for_all
     WHERE ARRAY_LENGTH(file_ids, 1) = 1
@@ -191,9 +176,13 @@ duplicate_file_count AS (
     WHERE f.id = ANY(SELECT unnest(file_ids) from duplicate_files)
     GROUP BY (p.id)
 ),
+subdir_counts AS (
+    SELECT parent_path_id path_id, COUNT(*) subdir_count FROM path GROUP BY parent_path_id
+),
 file_dirs_with_totals AS (
     SELECT p.id path_id, p.parent_path_id, ufc.count unique_count, dfc.count duplicate_count
     FROM path p
+    
     JOIN unique_file_count ufc ON p.id = ufc.id
     JOIN duplicate_file_count dfc ON p.id = dfc.id
 ),
@@ -204,14 +193,9 @@ dir_totals AS (
     FROM path p
     JOIN dir_totals dt ON p.id = dt.parent_path_id
 )
---SELECT *
---FROM dir_totals
-SELECT
-p.fullpath, SUM(dt.unique_count) unique_count, SUM(dt.duplicate_count) duplicate_count
+SELECT dt.*, sc.subdir_count
 FROM dir_totals dt
-JOIN paths p ON p.path_id = dt.path_id
-GROUP BY (p.fullpath)
-ORDER BY length(p.fullpath) ASC
+JOIN subdir_counts sc ON dt.path_id = sc.path_id
 ;
 
 DROP MATERIALIZED VIEW IF EXISTS dup_detail;
@@ -229,6 +213,60 @@ dups AS (
 select d.count dups, bn.* from branch_nodes bn
 join dups d using(checksum)
 order by bn.path_id asc
+;
+
+DROP MATERIALIZED VIEW IF EXISTS exact_dup_dirs;
+CREATE MATERIALIZED VIEW exact_dup_dirs AS
+WITH
+duplicate_files as (
+    SELECT file_ids FROM dup_groups_for_all
+    WHERE ARRAY_LENGTH(file_ids, 1) > 1
+),
+dup_containing_dirs AS (
+    SELECT distinct path_id
+    FROM dup_counts
+    WHERE duplicate_count > 1
+),
+x AS (
+    SELECT dd.path_id, array_agg(f.checksum ORDER BY f.checksum) checksum_list
+    FROM dup_containing_dirs dd
+    JOIN location l ON dd.path_id = l.path_id
+    JOIN file f ON f.location_id = l.id
+    GROUP BY(dd.path_id)
+),
+y AS (
+    SELECT array_agg(distinct x.path_id) dup_path_ids
+    FROM x
+    GROUP BY(x.checksum_list)
+)
+SELECT * FROM y
+WHERE ARRAY_LENGTH(dup_path_ids, 1) > 1
+;
+
+DROP MATERIALIZED VIEW IF EXISTS super_dirs;
+CREATE MATERIALIZED VIEW super_dirs AS
+WITH
+dup_containing_dirs AS (
+    SELECT distinct path_id
+    FROM dup_counts
+    WHERE duplicate_count > 1
+),
+all_checksums_for_path AS (
+    SELECT dd.path_id, array_agg(f.checksum ORDER BY f.checksum) checksum_list
+    FROM dup_containing_dirs dd
+    JOIN location l ON dd.path_id = l.path_id
+    JOIN file f ON f.location_id = l.id
+    GROUP BY(dd.path_id)
+),
+paths_contained_by_path AS (
+    SELECT p1.path_id path_id, array_agg(distinct p2.path_id) subset_dirs
+    FROM all_checksums_for_path p1, all_checksums_for_path p2
+    WHERE p1.path_id <> p2.path_id
+    -- does p1's file list contain p2's list?
+    AND p1.checksum_list @> p2.checksum_list
+    GROUP BY(p1.path_id)
+)
+SELECT array_prepend(path_id, subset_dirs) AS paths_contained_by_path FROM paths_contained_by_path
 ;
 
 -- describe tables, views and sequences
