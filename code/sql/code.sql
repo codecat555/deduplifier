@@ -242,16 +242,106 @@ RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_res text;
 BEGIN
-    raise notice 'path_from_id: id_in=%', id_in;
+    --raise notice 'path_from_file_id: id_in=%', id_in;
 
     select ps.fullpath || l.sepchar || f.name as name from file f
     join location l on f.location_id = l.id
     join path p on l.path_id = p.id
-    join paths ps on p.id = ps.id
+    join paths ps on p.id = ps.path_id
     where f.id = id_in
     into v_res
     ;
 
+    RETURN v_res;
+END $$;
+
+CREATE OR REPLACE FUNCTION path_from_path_id
+(
+    id_in integer
+)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_res text;
+BEGIN
+    --raise notice 'path_from_path_id: id_in=%', id_in;
+
+    select ps.fullpath from paths ps
+    where path_id = id_in
+    into v_res
+    ;
+
+    RETURN v_res;
+END $$;
+
+CREATE OR REPLACE FUNCTION discover_dup_dirs
+(
+--    id_in integer
+)
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+DECLARE
+    v_res BOOLEAN;
+BEGIN
+    raise notice 'discover_dup_dirs: starting...';
+
+    -- find the largest set of duplicate files common to each pair of dup-containing paths
+    --   for each file with duplicates:
+    --       find all parent paths for each file with duplicates:
+    --           group results by parent path list to get list of paths with common duplicates
+
 --    RETURN v_res;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE files_for_path_id_type AS (
+        file_id integer,
+        location_id integer,
+        path_id integer,
+        fullpath text
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE OR REPLACE FUNCTION files_for_path_id
+(
+    id_in integer
+)
+RETURNS SETOF files_for_path_id_type LANGUAGE plpgsql AS $$
+BEGIN
+    --raise notice 'files_with_dups: offset=%, limit=%', offset_in, limit_in;
+
+    RETURN QUERY
+    select f.id, l.id, p.id, path_from_file_id(f.id)
+    from file f
+    join location l on f.location_id = l.id
+    join path p on l.path_id = p.id
+    where p.id = id_in;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE files_for_checksum_type AS (
+        file_id integer,
+        location_id integer,
+        path_id integer,
+        fullpath text
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE OR REPLACE FUNCTION files_for_checksum
+(
+    checksum_in text
+)
+RETURNS SETOF files_for_checksum_type LANGUAGE plpgsql AS $$
+BEGIN
+    --raise notice 'files_with_dups: offset=%, limit=%', offset_in, limit_in;
+
+    RETURN QUERY
+    select f.id, l.id, p.id, path_from_file_id(f.id)
+    from file f
+    join location l on f.location_id = l.id
+    join path p on l.path_id = p.id
+    where f.checksum = checksum_in;
 END $$;
 

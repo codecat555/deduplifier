@@ -1,3 +1,16 @@
 refresh materialized view paths;
-refresh materialized view dup_counts ;
-refresh materialized view dup_detail ;
+refresh materialized view all_subpaths;
+refresh materialized view file_dup_groups;
+refresh materialized view unique_files;
+refresh materialized view duplicate_files;
+refresh materialized view unique_file_count_for_path;
+refresh materialized view duplicate_file_count_for_path;
+refresh materialized view file_dirs_with_totals;
+refresh materialized view dir_totals_expansion;
+refresh materialized view dir_totals;
+refresh materialized view subdir_counts_for_path;
+--refresh materialized view dup_counts_by_subpath;
+refresh materialized view dup_counts_for_path;
+refresh materialized view dup_detail;
+refresh materialized view exact_dup_dirs;
+--refresh materialized view super_dirs;

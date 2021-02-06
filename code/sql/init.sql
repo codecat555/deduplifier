@@ -7,6 +7,4 @@ ALTER SYSTEM SET max_connections TO '1000';
 
 \include_relative ddl.sql
 \include_relative code.sql
--- populate the mat views
-\include_relative refresh_views.sql
-
+\include_relative create_views.sql
