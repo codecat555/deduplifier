@@ -72,7 +72,7 @@ EXCLUDED_TAGS = [ 59932, 59933, 'UserComment', 'MakerNote', ]
 INT_TAGS = [ 'GPSAltitudeRef', 'GPSDifferential' ]
 TUPLE_TAGS = [ 'ComponentsConfiguration', 'GPSVersionID' ]
 
-EXCLUDE_PATTERNS = [ '^NTUSER.DAT' ]
+EXCLUDE_PATTERNS = [ '^NTUSER.DAT', 'AppData' ]
 EXCLUDE_REGEX = []
 for p in EXCLUDE_PATTERNS:
     EXCLUDE_REGEX.append(re.compile(p))
@@ -437,10 +437,10 @@ class FileProcessor:
             self.conn = psycopg2.connect(**self.connection_parameters)
 
         file_size = statinfo.st_size
-# WIP - make this limit a parameter
-        if file_size > FILE_SIZE_THRESHOLD:
-            logger.warning(f'process_file({self.pid}): skipping too-big file: {path}')
-            return
+# WIP - could make this limit a parameter
+#        if file_size > FILE_SIZE_THRESHOLD:
+#            logger.warning(f'process_file({self.pid}): skipping too-big file: {path}')
+#            return
 
         if skip_known_files:
             file_id = self.fetch_file_id(path)
