@@ -17,7 +17,7 @@ CPUS=1
 # memory in MiB
 MEM=8132
 # disk size in MiB
-DISK_SIZE=10
+DISK_SIZE=40
 MP_DISK_SIZE=$(DISK_SIZE)g
 DISK_PATH=
 
