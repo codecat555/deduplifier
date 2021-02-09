@@ -194,64 +194,14 @@ CREATE MATERIALIZED VIEW file_dirs_with_totals AS
     WHERE ufc.count > 0 OR dfc.count > 0
 ;
 
---DROP MATERIALIZED VIEW IF EXISTS dir_totals_expansion CASCADE;
---CREATE MATERIALIZED VIEW dir_totals_expansion AS
---WITH RECURSIVE cte AS (
---    SELECT path_id, parent_path_id, 0 as level, unique_count, duplicate_count, unique_size_in_bytes, dup_size_in_bytes
---    FROM file_dirs_with_totals fdwt
---    WHERE path_id IN (SELECT DISTINCT path_id FROM location)
---    UNION
---    SELECT
---        p.id path_id,
---        p.parent_path_id,
---        (dt.level + 1) as level,
---        0 unique_count,
---        0 duplicate_count,
---        0 unique_size_in_bytes,
---        0 dup_size_in_bytes
---    FROM path p
---    JOIN cte dt ON p.id = dt.parent_path_id
---)
---select * from cte
---;
-
---DROP MATERIALIZED VIEW IF EXISTS dir_totals_expansion CASCADE;
---CREATE MATERIALIZED VIEW dir_totals_expansion AS
---WITH RECURSIVE cte AS (
---    -- start at the leaf paths
---    SELECT path_id, parent_path_id, NULL::integer child_path_id, 0 as level, unique_count, duplicate_count, unique_size_in_bytes, dup_size_in_bytes
---    FROM file_dirs_with_totals fdwt
---    WHERE path_id NOT IN (SELECT DISTINCT parent_path_id FROM path WHERE parent_path_id IS NOT NULL)
---    UNION
---    -- create a row for all ancestors of each leaf with that leaf's values
---    SELECT
---        p.id path_id,
---        p.parent_path_id,
---        dt.path_id child_path_id,
---        (dt.level + 1) as level,
---        dt.unique_count unique_count,
---        dt.duplicate_count duplicate_count,
---        dt.unique_size_in_bytes unique_size_in_bytes,
---        dt.dup_size_in_bytes dup_size_in_bytes
---    FROM path p
---    JOIN cte dt ON p.id = dt.parent_path_id
---)
---select * from cte
---UNION ALL
----- finally, add in the counts for those paths which contain files but are not leaves
---SELECT path_id, parent_path_id, NULL::integer child_path_id, 0 as level, unique_count, duplicate_count, unique_size_in_bytes, dup_size_in_bytes
---FROM file_dirs_with_totals fdwt
---WHERE path_id IN (SELECT DISTINCT parent_path_id FROM path WHERE parent_path_id IS NOT NULL)
---;
-
 DROP MATERIALIZED VIEW IF EXISTS dir_totals_expansion CASCADE;
 CREATE MATERIALIZED VIEW dir_totals_expansion AS
 WITH RECURSIVE cte AS (
-    -- start at the leaf paths
+    -- start with the set of file-containing paths
     SELECT path_id, parent_path_id, NULL::integer child_path_id, 0 as level, unique_count, duplicate_count, unique_size_in_bytes, dup_size_in_bytes
     FROM file_dirs_with_totals fdwt
     UNION
-    -- create a row for all ancestors of each leaf with that leaf's values
+    -- create a row for all ancestors of each file-containing path with that path's values
     SELECT
         p.id path_id,
         p.parent_path_id,
@@ -281,101 +231,100 @@ CREATE MATERIALIZED VIEW dir_totals AS
     GROUP BY (path_id, parent_path_id)
 ;
 
+DROP MATERIALIZED VIEW IF EXISTS dup_dirs_expansion CASCADE;
+CREATE MATERIALIZED VIEW dup_dirs_expansion AS
+WITH RECURSIVE
+file_containing_paths AS (
+    SELECT fdwt.path_id, fdwt.parent_path_id, array_agg(f.checksum ORDER BY f.checksum) checksum_list
+    FROM file_dirs_with_totals fdwt
+    join location l on l.path_id = fdwt.path_id
+    join file f on f.location_id = l.id
+    --WHERE fdwt.unique_count = 0 AND fdwt.duplicate_count > 0
+    WHERE fdwt.duplicate_count > 0
+    GROUP BY(fdwt.path_id, fdwt.parent_path_id)
+),
+cte AS (
+    -- start with the set of file-containing paths
+    SELECT path_id, parent_path_id, NULL::integer child_path_id, 0 as level, checksum_list
+    FROM file_containing_paths
+    UNION
+    -- create a row for all ancestors of each file-containing path with that path's values
+    SELECT
+        parent.id path_id,
+        parent.parent_path_id,
+        child.path_id child_path_id,
+        (child.level + 1) as level,
+        checksum_list
+    FROM path parent
+    JOIN cte child ON parent.id = child.parent_path_id
+)
+select * from cte
+;
+CREATE INDEX IF NOT EXISTS dup_dirs_expansion_path_id_idx ON dup_dirs_expansion (path_id);
+CREATE INDEX IF NOT EXISTS dup_dirs_expansion_parent_path_id_idx ON dup_dirs_expansion (parent_path_id);
+CREATE INDEX IF NOT EXISTS dup_dirs_expansion_level_idx ON dup_dirs_expansion (level);
+CREATE INDEX IF NOT EXISTS dup_dirs_expansion_composite_idx ON dup_dirs_expansion (path_id, parent_path_id, level);
+
+--DROP MATERIALIZED VIEW IF EXISTS dup_dirs_contraction CASCADE;
+--CREATE MATERIALIZED VIEW dup_dirs_contraction AS
+--WITH cte0 AS (
+--    select
+--        array_agg(path_id) path_id_list,
+--        --array_agg(parent_path_id) parent_path_id_list,
+--        level,
+--        checksum_list
+--    from dup_dirs_expansion
+--    group by level, checksum_list
+--)
+--select * from cte0
+--;
+--
+--DROP MATERIALIZED VIEW IF EXISTS dup_dirs_subtraction CASCADE;
+--CREATE MATERIALIZED VIEW dup_dirs_subtraction AS
+--WITH cte0 AS (
+--    select
+--        dde1.path_id, dde2.path_id, ARRAY[(unnest(dde1.checksum_list) - unnest(dde2.checksum_list)) diff
+--    from dup_dirs_expansion dde1
+--    join dup_dirs_expansion dde2
+--    where dde1.level = dde2.level
+--    and dde1.path_id != dde2.path_id
+--)
+--select * from cte0
+--;
+
+DROP MATERIALIZED VIEW IF EXISTS dup_dirs_subtraction CASCADE;
+CREATE MATERIALIZED VIEW dup_dirs_subtraction AS
+SELECT
+    dde1.path_id path_id1,
+    dde2.path_id path_id2,
+    (
+        SELECT array_agg(i) FROM unnest(dde1.checksum_list) AS arr(i)
+        WHERE NOT ARRAY[i] <@ dde2.checksum_list
+    ) AS unique
+FROM dup_dirs_expansion dde1
+JOIN dup_dirs_expansion dde2
+ON dde1.path_id != dde2.path_id
+WHERE dde1.level = dde2.level
+;
+
+DROP MATERIALIZED VIEW IF EXISTS dup_dirs CASCADE;
+CREATE MATERIALIZED VIEW dup_dirs AS
+    select
+        path_id,
+        parent_path_id,
+        MAX(level) as level,
+        SUM(unique_count) unique_count,
+        SUM(duplicate_count) duplicate_count,
+        SUM(unique_size_in_bytes) unique_size_in_bytes,
+        SUM(dup_size_in_bytes) dup_size_in_bytes
+    from dir_totals_expansion
+    GROUP BY (path_id, parent_path_id)
+;
+
 DROP MATERIALIZED VIEW IF EXISTS subdir_counts_for_path CASCADE;
 CREATE MATERIALIZED VIEW subdir_counts_for_path AS
     SELECT parent_path_id path_id, COUNT(*) subdir_count FROM path GROUP BY parent_path_id
 ;
-
-DROP MATERIALIZED VIEW IF EXISTS dup_counts_for_path CASCADE;
-CREATE MATERIALIZED VIEW dup_counts_for_path AS
-SELECT
-    dt.*,
-    COALESCE(sc.subdir_count, 0) subdir_count
-    FROM dir_totals dt
-    LEFT OUTER JOIN subdir_counts_for_path sc USING(path_id)
-order by path_id
-;
-
--- WIP - why does this currently return only 14221 rows when path contains 233651 unique path id's and
--- WIP - location contains 190289 distinct path_id's (190291 total)?
---DROP MATERIALIZED VIEW IF EXISTS dup_counts_for_path CASCADE;
---CREATE MATERIALIZED VIEW dup_counts_for_path AS
---WITH RECURSIVE
---unique_files AS (
---    SELECT file_ids FROM file_dup_groups
---    WHERE ARRAY_LENGTH(file_ids, 1) = 1
---),
---duplicate_files as (
---    SELECT file_ids FROM file_dup_groups
---    WHERE ARRAY_LENGTH(file_ids, 1) > 1
---),
---unique_file_count_for_path AS (
---    SELECT p.id path_id, COUNT(*), SUM(f.size_in_bytes) size_in_bytes
---    FROM file f
---    JOIN location l ON f.location_id = l.id
---    JOIN path p ON l.path_id = p.id
---    WHERE f.id = ANY(SELECT unnest(file_ids) from unique_files)
---    GROUP BY (p.id)
---),
---duplicate_file_count_for_path AS (
---    SELECT p.id path_id, COUNT(*), SUM(f.size_in_bytes) size_in_bytes
---    FROM file f
---    JOIN location l ON f.location_id = l.id
---    JOIN path p ON l.path_id = p.id
---    WHERE f.id = ANY(SELECT unnest(file_ids) from duplicate_files)
---    GROUP BY (p.id)
---),
---file_dirs_with_totals AS (
---    SELECT
---        p.id path_id,
---        p.parent_path_id,
---        COALESCE(ufc.count, 0) unique_count,
---        COALESCE(dfc.count, 0) duplicate_count,
---        COALESCE(ufc.size_in_bytes, 0) unique_size_in_bytes,
---        COALESCE(dfc.size_in_bytes, 0) dup_size_in_bytes
---    FROM path p
---    LEFT OUTER JOIN unique_file_count_for_path ufc ON p.id = ufc.path_id
---    LEFT OUTER JOIN duplicate_file_count_for_path dfc ON p.id = dfc.path_id
---    WHERE ufc.count > 0 OR dfc.count > 0
---),
---dir_totals_expansion AS (
---    SELECT path_id, parent_path_id, 0 as level, unique_count, duplicate_count, unique_size_in_bytes, dup_size_in_bytes
---    FROM file_dirs_with_totals fdwt
---    UNION ALL
---    SELECT
---        p.id path_id,
---        p.parent_path_id,
---        (dt.level + 1) as level,
---        0 unique_count,
---        0 duplicate_count,
---        0 unique_size_in_bytes,
---        0 dup_size_in_bytes
---    FROM path p
---    JOIN dir_totals_expansion dt ON p.id = dt.parent_path_id
---),
---dir_totals AS (
---    select
---        parent_path_id path_id,
---        MAX(level) as level,
---        SUM(unique_count) unique_count,
---        SUM(duplicate_count) duplicate_count,
---        SUM(unique_size_in_bytes) unique_size_in_bytes,
---        SUM(dup_size_in_bytes) dup_size_in_bytes
---    from dir_totals_expansion
---    GROUP BY (parent_path_id)
---    UNION ALL
---    SELECT * from file_dirs_with_totals
---),
---subdir_counts_for_path AS (
---    SELECT parent_path_id path_id, COUNT(*) subdir_count FROM path GROUP BY parent_path_id
---)
---SELECT
---    dt.*,
---    COALESCE(sc.subdir_count, 0) subdir_count
---    FROM dir_totals dt
---    LEFT OUTER JOIN subdir_counts_for_path sc USING(path_id)
---order by path_id
---;
 
 -- WIP: need to verify this
 DROP MATERIALIZED VIEW IF EXISTS dup_detail CASCADE;
