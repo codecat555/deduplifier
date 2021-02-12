@@ -7,10 +7,15 @@
     <meta charset="utf-8">
     <meta name="description" content={{description}}>
     <link rel="shortcut icon" href="/favicon.ico">
+    <style>
+        table, th, td {
+          border: 1px solid black;
+          border-collapse: collapse;
+        }
+    </style>
   </head>
 
   <body>
-    {% include 'navigation.html' %}
     {% block content %}{% endblock %}
   </body>
 

@@ -22,7 +22,8 @@ connection_parameters = dict(
     host = "db",
     #port = "6681",
     port = "3368",
-    database = "deduplifier"
+    #database = "deduplifier"
+    database = "boffo"
 )
 
 class app_db:
@@ -39,9 +40,17 @@ class app_db:
 
         result = self.get_counts()
         if result[0] == 0:
-            return render_template('db_summary-empty.html', title='Database Summary', arg0='something')
+            template_name = 'db_summary-empty.html'
         else:
-            return render_template('db_summary.html', title='Database Summary', counts=result)
+            template_name = 'db_summary.html'
+
+        return render_template(
+            template_name,
+            title='Deduplifier Summary',
+            description='Summary of Deduplifier database contents',
+            dbname=connection_parameters['database'],
+            file_count=result
+        )
 
     def __del__(self):
         if self.conn:

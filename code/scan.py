@@ -1,4 +1,8 @@
 
+"""
+    scan.py - a program for scanning a given directory hierarchy and upload the results to the Deduplifier database.
+"""
+
 #
 # install required modules: 
 #   python3 -m pip install --upgrade pip

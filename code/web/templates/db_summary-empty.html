@@ -1,11 +1,67 @@
-<html>
-<head>
-<title>Database Summary</title>
-<body>
-</head>
-<body>
-<h1>
-Your database is empty. You can populate it by running scan.py, as described below ({{arg0}}).
-</h1>
-</body>
-</html>
+<!-- Based on example here: https://hackersandslackers.com/flask-jinja-templates -->
+{% extends 'layout.html' %}
+
+{% block content %}
+    <div class="container">
+        <h1>{{title}}</h1>
+        Database name: {{dbname}}
+        <h2>
+            Your database is empty. You can populate it by running scan.py, as described below.
+        </h2>
+
+        <p>
+        Run the <i>scan.py</i> program on your system to gather information about your files and store it in the database.
+        To do this, you must provide a worker count and one or more target directories.
+        </p>
+
+        <code>
+            usage: scan.py [-skip_known_files] <worker-count> <target-directory>[,<target-directory>...]
+        </code>
+
+        <p>
+
+        <table>
+          <colgroup>
+            <col style="width: 15%" />
+            <col style="width: 85%" />
+          </colgroup>
+          <thead>
+            <tr>
+                <th>Parameter Name</th>
+                <th>Description</th>
+            </tr>
+          </thead>    
+          <tbody>
+            <tr>
+              <td align=center>Worker Count</td>
+              <td>
+                This parameter indicates how many parallel worker processes to run.
+                <p>
+                Specifying a higher number (e.g. 20) may reduce the amount of time it takes to complete the scan, as some processes can continue working on other files while the other processes are waiting for a response from the disk or the database.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td align=center>
+                Target Directory
+              </td>
+              <td>
+                Specifies which files should be scanned and recorded in the database.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <table>
+          <tbody>
+            {% for row in files %}    
+                <tr>
+                    <td style="text-align:right">{{loop.index}}</td>
+                    <td style="text-align:right">{{row[0]}}</td>
+                    <td>{{row[1]}}</td>
+                </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+    </div>
+{% endblock %}
