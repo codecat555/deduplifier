@@ -334,7 +334,7 @@ class FileProcessor:
                 continue
 
             data = exifdata.get(tag_id)
-            logger.debug(f'get_tags({self.pid}): HERE 100 - {data=}')
+            # logger.debug(f'get_tags({self.pid}): HERE 100 - {data=}')
 
             # handle gps data
             # see https://gist.github.com/erans/983821/e30bd051e1b1ae3cb07650f24184aa15c0037ce8
@@ -375,7 +375,7 @@ class FileProcessor:
                         before = gps_value
                         gps_value = gps_value[:idx]
 # WIP - review this
-                        logger.debug(f'get_tags({self.pid}): HERE 1 - gps_tag is {gps_tag}, idx is {idx}, before is {before}, after is {gps_value}')
+                        # logger.debug(f'get_tags({self.pid}): HERE 1 - gps_tag is {gps_tag}, idx is {idx}, before is {before}, after is {gps_value}')
                     except ValueError:
                         pass
 
@@ -408,7 +408,7 @@ class FileProcessor:
                     idx = data.index('\x00')
                     before = data
                     data = data[:idx]
-                    logger.debug(f'get_tags({self.pid}): HERE 0 - tag is {tag}, idx is {idx}, before is {before}, after is {data}')
+                    # logger.debug(f'get_tags({self.pid}): HERE 0 - tag is {tag}, idx is {idx}, before is {before}, after is {data}')
                 except ValueError:
                     pass
 
