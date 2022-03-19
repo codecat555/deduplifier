@@ -292,20 +292,20 @@ CREATE INDEX IF NOT EXISTS dup_dirs_expansion_composite_idx ON dup_dirs_expansio
 --select * from cte0
 --;
 
-DROP MATERIALIZED VIEW IF EXISTS dup_dirs_subtraction CASCADE;
-CREATE MATERIALIZED VIEW dup_dirs_subtraction AS
-SELECT
-    dde1.path_id path_id1,
-    dde2.path_id path_id2,
-    (
-        SELECT array_agg(i) FROM unnest(dde1.checksum_list) AS arr(i)
-        WHERE NOT ARRAY[i] <@ dde2.checksum_list
-    ) AS unique
-FROM dup_dirs_expansion dde1
-JOIN dup_dirs_expansion dde2
-ON dde1.path_id != dde2.path_id
-WHERE dde1.level = dde2.level
-;
+--DROP MATERIALIZED VIEW IF EXISTS dup_dirs_subtraction CASCADE;
+--CREATE MATERIALIZED VIEW dup_dirs_subtraction AS
+--SELECT
+--    dde1.path_id path_id1,
+--    dde2.path_id path_id2,
+--    (
+--        SELECT array_agg(i) FROM unnest(dde1.checksum_list) AS arr(i)
+--        WHERE NOT ARRAY[i] <@ dde2.checksum_list
+--    ) AS unique
+--FROM dup_dirs_expansion dde1
+--JOIN dup_dirs_expansion dde2
+--ON dde1.path_id != dde2.path_id
+--WHERE dde1.level = dde2.level
+--;
 
 DROP MATERIALIZED VIEW IF EXISTS dup_dirs CASCADE;
 CREATE MATERIALIZED VIEW dup_dirs AS
@@ -324,6 +324,16 @@ CREATE MATERIALIZED VIEW dup_dirs AS
 DROP MATERIALIZED VIEW IF EXISTS subdir_counts_for_path CASCADE;
 CREATE MATERIALIZED VIEW subdir_counts_for_path AS
     SELECT parent_path_id path_id, COUNT(*) subdir_count FROM path GROUP BY parent_path_id
+;
+
+DROP MATERIALIZED VIEW IF EXISTS dup_counts_for_path CASCADE;
+CREATE MATERIALIZED VIEW dup_counts_for_path AS
+SELECT
+    dt.*,
+    COALESCE(sc.subdir_count, 0) subdir_count
+    FROM dir_totals dt
+    LEFT OUTER JOIN subdir_counts_for_path sc USING(path_id)
+order by path_id
 ;
 
 -- WIP: need to verify this
