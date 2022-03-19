@@ -317,8 +317,12 @@ class FileProcessor:
         logger = logging.getLogger(__name__)
         logger.info(f'get_tags({self.pid}): starting...')
         tags = {}
-        exifdata = image.getexif()
-
+        # WIP - after upgrading PIL, below does not work anymore. use _getexif() as a workaround for now.
+        # WIP - longterm solution involves looping through all the TAGS and trying to fetch each of them
+        # WIP - via get_ifd(). see https://github.com/python-pillow/Pillow/issues/5863#issuecomment-9849171411
+        # exifdata = image.getexif()
+        exifdata = image._getexif()
+        
         # now, handle the rest
         for tag_id in exifdata:
             tag = TAGS.get(tag_id, tag_id)
@@ -330,6 +334,7 @@ class FileProcessor:
                 continue
 
             data = exifdata.get(tag_id)
+            logger.debug(f'get_tags({self.pid}): HERE 100 - {data=}')
 
             # handle gps data
             # see https://gist.github.com/erans/983821/e30bd051e1b1ae3cb07650f24184aa15c0037ce8
@@ -425,7 +430,7 @@ class FileProcessor:
                 # capture (and filter) the image tags, for upload
                 tags = self.get_tags(path, image)
         except Exception as error:
-            logger.warning(f'get_tags({self.pid}): failed to open image file, skipping...')
+            logger.warning(f'process_image({self.pid}): failed to open image file, skipping...')
             logger.exception(error)
         else:
             # upsert image in db
