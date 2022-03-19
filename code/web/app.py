@@ -9,7 +9,7 @@ import redis
 cache = redis.Redis(host='redis', port=6379)
 
 from flask import Flask, render_template
-app = Flask(__name__)
+app = Flask(__name__, static_url_path='/static')
 
 import psycopg2
 from psycopg2 import Error
@@ -20,10 +20,11 @@ connection_parameters = dict(
     user = "postgres",
     password = "postgres",
     host = "db",
-    #port = "6681",
+    # use db internal port here
     port = "3368",
-    #database = "deduplifier"
-    database = "boffo"
+    # database used for testing
+    #database = "boffo"
+    database = "deduplifier"
 )
 
 class app_db:
@@ -49,7 +50,7 @@ class app_db:
             title='Deduplifier Summary',
             description='Summary of Deduplifier database contents',
             dbname=connection_parameters['database'],
-            file_count=result
+            counts=result
         )
 
     def __del__(self):
@@ -117,10 +118,11 @@ def welcome():
     #return 'Hello World! I have been seen {} times.\n'.format(count)
     return db.welcome()
 
-@app.route('/files_with_dups')
-def files_with_dups():
+@app.route('/files_with_dups', defaults={ 'start_idx': 1, 'rows_per_page': 20 })
+@app.route('/files_with_dups/<int:start_idx>/<int:rows_per_page>')
+def files_with_dups(start_idx, rows_per_page):
     db = app_db(connection_parameters)
-    return db.list_files_with_dups()
+    return db.list_files_with_dups(start_idx, rows_per_page)
 
 @app.route('/hello')
 def hello():
@@ -134,6 +136,11 @@ def pwd():
 @app.route('/testit')
 def testit():
     return ',   '.join(os.listdir('web'))
+
+# @app.route('/doc/scan')
+# def scan_doc():
+#     # note: the path here is relative to the 'static' sub-directory located next to app.py
+#     return app.send_static_file('scan.html')
 
 #@app.route('/dump')
 #def pwd():
