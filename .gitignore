@@ -1,1 +1,5 @@
 db
+archive
+code/testdata
+log
+test/test*/test-data
