@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION upsert_file
     filename_in text,
     mime_type_in text,
     mime_subtype_in text,
-    size_in_bytes_in integer,
+    size_in_bytes_in bigint,
     checksum_in text,
     checksum_type_in text,
     create_date_in timestamp with time zone,
@@ -168,36 +168,41 @@ BEGIN
     RETURN v_file_id;
 END $$;
 
---DO $$ BEGIN
---    CREATE TYPE count_type AS (
---        count_name text,
---        count_value integer
---    );
---EXCEPTION
---    WHEN duplicate_object THEN null;
---END $$;
---
---CREATE OR REPLACE FUNCTION get_counts1()
---RETURNS count_type[] LANGUAGE plpgsql AS $$
---DECLARE
---    v_file_count count_type;
---    --v_counts integer[];
---BEGIN
---    --v_counts = array_append(v_counts, tag_id);
---    --SELECT count(*) FROM file f INTO v_counts[0];
---    SELECT 'file',count(*) FROM file f INTO v_file_count;
---
---    RETURN ARRAY[v_file_count];
---END $$;
+DO $$ BEGIN
+    CREATE TYPE count_type AS (
+        count_name text,
+        count_value bigint
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE OR REPLACE FUNCTION get_counts()
-RETURNS integer[] LANGUAGE plpgsql AS $$
+RETURNS count_type[] LANGUAGE plpgsql AS $$
 DECLARE
-    v_file_count integer;
+    v_file_count count_type;
+    --v_counts integer[];
+    ct count_type;
+    result count_type[];
 BEGIN
-    SELECT count(*) FROM file f INTO v_file_count;
+    SELECT 'file',count(*) FROM file f INTO ct;
+    result = array_append(result, ct);
 
-    RETURN ARRAY[v_file_count];
+    SELECT 'total_bytes',SUM(size_in_bytes) FROM file f INTO ct;
+    result = array_append(result, ct);
+
+    WITH group_sums AS (
+        SELECT SUM(size_in_bytes) size_in_bytes FROM file
+        GROUP BY checksum
+        HAVING COUNT(*) > 2
+    )
+    SELECT 'duplicate_bytes',sum(size_in_bytes) FROM group_sums INTO ct;
+    result = array_append(result, ct);
+
+    --SELECT 'file',count(*) FROM file f INTO ct;
+    --result = array_append(result, ct);
+
+    RETURN result;
 END $$;
 
 DO $$ BEGIN
