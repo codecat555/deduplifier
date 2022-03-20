@@ -171,36 +171,33 @@ END $$;
 DO $$ BEGIN
     CREATE TYPE count_type AS (
         count_name text,
-        count_value bigint
+        count_value bigint,
+        count_bytes bigint
     );
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
+CREATE OR REPLACE FUNCTION get_totals()
+RETURNS count_type LANGUAGE sql AS
+$$
+    SELECT 'TOTALS', count(*), COALESCE(SUM(size_in_bytes), 0) FROM file;
+$$;
+
 CREATE OR REPLACE FUNCTION get_counts()
 RETURNS count_type[] LANGUAGE plpgsql AS $$
 DECLARE
-    v_file_count count_type;
+    -- v_file_count count_type;
     --v_counts integer[];
-    ct count_type;
+    -- ct count_type;
     result count_type[];
 BEGIN
-    SELECT 'file',count(*) FROM file f INTO ct;
-    result = array_append(result, ct);
-
-    SELECT 'total_bytes',SUM(size_in_bytes) FROM file f INTO ct;
-    result = array_append(result, ct);
-
-    WITH group_sums AS (
-        SELECT SUM(size_in_bytes) size_in_bytes FROM file
-        GROUP BY checksum
-        HAVING COUNT(*) > 2
-    )
-    SELECT 'duplicate_bytes',sum(size_in_bytes) FROM group_sums INTO ct;
-    result = array_append(result, ct);
-
-    --SELECT 'file',count(*) FROM file f INTO ct;
-    --result = array_append(result, ct);
+    result := ARRAY(
+        SELECT COUNT(*), SUM(size_in_bytes), COALESCE(checksum,'TOTAL') checksum FROM file
+        GROUP BY ROLLUP(checksum)
+        HAVING COUNT(*) > 1
+        ORDER BY COUNT(*) DESC
+    );
 
     RETURN result;
 END $$;

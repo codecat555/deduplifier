@@ -2,21 +2,25 @@
 {% extends 'layout.html' %}
 
 {% block content %}
-    <div class="container">
+        <div class="container">
         <h1>{{title}}</h1>
-        Database name: {{dbname}}
+        Database name: <i>{{dbname}}</i>
         <h2>
             Your database is empty. You can populate it by running scan.py, as described below.
         </h2>
 
-        <p>
-        Run the <i>scan.py</i> program on your system to gather information about your files and store it in the database.
-        To do this, you must provide a worker count and one or more target directories.
-        </p>
+        <big>
+            <p>
+            Run the <i>scan.py</i> program on your system to gather information about your files and store it in the database.
+            To do this, you must provide a worker count and one or more target directories.
+            </p>
+        </big>
 
-        <code>
-            usage: scan.py [-skip_known_files] <worker-count> <target-directory>[,<target-directory>...]
-        </code>
+        <big>
+            <code>
+            usage: scan.py [-skip_known_files] &lt;worker-count&gt; &lt;target-directory&gt;[,&lt;target-directory&gt;...]
+            </code>
+        </big>
 
         <p>
 
@@ -33,7 +37,13 @@
           </thead>    
           <tbody>
             <tr>
-              <td align=center>Worker Count</td>
+              <td align=center>skip_known_files</td>
+              <td>
+                <i>Optional</i>. This parameter causes the code to query the database for each discovered file before processing it further, and to then skip those that are already known.
+              </td>
+            </tr>
+            <tr>
+              <td align=center>worker-count</td>
               <td>
                 This parameter indicates how many parallel worker processes to run.
                 <p>
@@ -43,10 +53,10 @@
             </tr>
             <tr>
               <td align=center>
-                Target Directory
+                target-directory
               </td>
               <td>
-                Specifies which files should be scanned and recorded in the database.
+                Specifies which folders should be scanned for files to be recorded in the database.
               </td>
             </tr>
           </tbody>

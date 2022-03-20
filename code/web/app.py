@@ -23,8 +23,8 @@ connection_parameters = dict(
     # use db internal port here
     port = "3368",
     # database used for testing
-    #database = "boffo"
-    database = "deduplifier"
+    database = "boffo"
+    # database = "deduplifier"
 )
 
 class app_db:
@@ -39,8 +39,8 @@ class app_db:
         if not self.conn:
             self.conn = psycopg2.connect(**self.connection_parameters)
 
-        result = self.get_counts()
-        if result[0] == 0:
+        result = self.get_totals()
+        if int(result[1]) == 0:
             template_name = 'db_summary-empty.html'
         else:
             template_name = 'db_summary.html'
@@ -49,13 +49,27 @@ class app_db:
             template_name,
             title='Deduplifier Summary',
             description='Summary of Deduplifier database contents',
-            dbname=connection_parameters['database'],
-            counts=result
+            dbname=self.conn.get_dsn_parameters()['dbname'],
+            total_count=result[1],
+            total_size=result[2]
         )
 
     def __del__(self):
         if self.conn:
             self.conn.close()
+
+    def get_totals(self):
+        if not self.conn:
+            self.conn = psycopg2.connect(**self.connection_parameters)
+
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.callproc('get_totals', [])
+                result = cursor.fetchone()
+        finally:
+            self.conn.rollback()
+
+        return result
 
     def get_counts(self):
         if not self.conn:
@@ -64,7 +78,7 @@ class app_db:
         try:
             with self.conn.cursor() as cursor:
                 cursor.callproc('get_counts', [])
-                result = cursor.fetchone()[0]
+                result = cursor.fetchall()
         finally:
             self.conn.rollback()
 
