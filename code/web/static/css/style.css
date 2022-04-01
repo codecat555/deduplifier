@@ -1,0 +1,68 @@
+a {
+    text-decoration: none;
+    display: inline-block;
+    padding: 8px 16px;
+}
+
+a:hover {
+    background-color: #ddd;
+    color: black;
+}
+
+.previous {
+    background-color: #f1f1f1;
+    color: black;
+}
+
+.next {
+    background-color: #04AA6D;
+    color: white;
+}
+
+.round {
+    border-radius: 50%;
+}
+table, th, td {
+    border: 1px solid black;
+    border-collapse: collapse;
+    padding: 4px;6
+}
+
+results_table {
+    width: 100%;
+    border: 1px solid black;
+    border-collapse: collapse;
+}
+
+/* .nav {
+    display: inline-block;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-justify-content: space-between;
+    justify-content: space-between;
+}
+
+.nav input[type="number"] {
+    width: 80px;
+} */
+
+.results_block button[name="pager"][value="previous"] {
+    float: left;
+}
+
+.results_block button[name="pager"][value="next"] {
+    float: right;
+}
+
+/* .nav input[name="start_idx"] {
+    float: left;
+} */
+
+.nav label[name="rows_per_page"] {
+    text-align: right;
+    float: right;
+}
+
+.nav input[name="rows_per_page"] {
+    float: right;
+}

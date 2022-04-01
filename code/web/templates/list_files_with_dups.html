@@ -1,50 +1,93 @@
 <!-- Based on example here: https://hackersandslackers.com/flask-jinja-templates -->
 {% extends 'layout.html' %}
 
-{% block content %}
-    <div class="container">
-        <h1>{{title}}</h1>
-        <p>{{description}}</p>
-    </div>
+<div class="container">
+    <h1>{{title}}</h1>
+    <p>{{description}}</p>
+</div>
 
 <!-- Based on example here: https://kanchanardj.medium.com/how-to-display-database-content-in-your-flask-website-8a62492ba892 -->
+{% block content %}
 
-    <table>
-      <tbody>
-        <tr>
-          <td>Requested row start index: {{ start_idx }}</td>
-        </tr>
-        <tr>
-          <td>Result row count: {{ rows_per_page }}</td>
-        </tr>
-        <tr>
-          <td>Actual row count: {{ row_count }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <!--
+      <table>
+        <tbody>
+          <tr>
+            <td>Requested row start index: {{ start_row }}</td>
+          </tr>
+          <tr>
+            <td>Result row count: {{ rows_per_page }}</td>
+          </tr>
+          <tr>
+            <td>Actual row count: {{ row_count }}</td>
+          </tr>
+        </tbody>
+      </table>
+    -->
 
-    <table>
-      <colgroup>
-        <col style="width: 18%" />
-        <col style="width: 18%" />
-        <col style="width: 74%" />
-      </colgroup>
-      <thead>
-        <tr>
-            <th>#</th>
-            <th>Duplicates</th>
-            <th>File Name</th>
-        </tr>
-      </thead>    
-      <tbody>
-        {% for row in files %}    
+    <br/>
+ 
+      <!-- <div class="form1">
+        <form action="/files_with_dups" method = "POST">
+            <p>
+            <label>Start row</label>
+            <input type = "number" name = "start_row" min='1' value={{start_row}} />
+            </p>
+            <label>Rows per page</label>
+            <input type = "number" name = "rows_per_page" min='1' value={{rows_per_page}} />
+            </p>
+            <p><input align="right" type = "submit" value = "Submit" /></p>
+        </form>
+      </div> -->
+
+      <br/>
+      <br/>
+
+    <div class="results_block">
+      <!-- {% include 'dup_form_args.html' %}
+      {% include 'dup_form_nav.html' %} -->
+
+      <div>
+        <table class="results_table">
+          <!-- <colgroup>
+            <col style="width: 10%" />
+            <col style="width: 20%" />
+            <col style="width: 70%" />
+          </colgroup> -->
+          <thead>
             <tr>
-                <td style="text-align:right">{{loop.index}}</td>
-                <td style="text-align:right">{{row[0]}}</td>
-                <td>{{row[1]}}</td>
+              {% include 'dup_form_args.html' %}
             </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
+            <tr>
+              {% include 'dup_form_nav.html' %}
+            </tr>
+            <tr>
+                <th>#</th>
+                <th>Duplicates</th>
+                <th>Total Mb</th>
+                <th>File Name</th>
+            </tr>
+          </thead>    
+          <tbody>
+            {% for row in files %}    
+                <tr>
+                    <td style="text-align:right">{{start_row | int + loop.index0}}</td>
+                    <td style="text-align:right">{{row[0]}}</td>
+                    <td style="text-align:right">{{row[1]}}</td>
+                    <td>{{row[2]}}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+            <tfoot>
+              <tr>
+                {% include 'dup_form_nav.html' %}
+              </tr>
+              <tr>
+                {% include 'dup_form_args.html' %}
+              </tr>
+            </tfoot>
+        </table>
+      </div>
+    </div>
+  
 {% endblock %}

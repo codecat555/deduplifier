@@ -8,9 +8,15 @@ import os
 import redis
 cache = redis.Redis(host='redis', port=6379)
 
-from flask import Flask, render_template
+from flask import Flask, render_template, request
+from werkzeug.exceptions import BadRequest
 app = Flask(__name__, static_url_path='/static')
 
+# from https://flask.palletsprojects.com/en/2.0.x/errorhandling
+@app.errorhandler(BadRequest)
+def handle_bad_request(e):
+    return 'bad bad request!', 400
+    
 import psycopg2
 from psycopg2 import Error
 import psycopg2.extras
@@ -23,8 +29,8 @@ connection_parameters = dict(
     # use db internal port here
     port = "3368",
     # database used for testing
-    database = "boffo"
-    # database = "deduplifier"
+    # database = "boffo"
+    database = "deduplifier"
 )
 
 class app_db:
@@ -65,9 +71,12 @@ class app_db:
         try:
             with self.conn.cursor() as cursor:
                 cursor.callproc('get_totals', [])
-                result = cursor.fetchone()
+                # result = cursor.fetchone()
+                result = cursor.fetchall()[0]
+                cursor.close()
         finally:
-            self.conn.rollback()
+            # connection.close()
+            pass
 
         return result
 
@@ -78,9 +87,12 @@ class app_db:
         try:
             with self.conn.cursor() as cursor:
                 cursor.callproc('get_counts', [])
-                result = cursor.fetchall()
+                # result = cursor.fetchall()
+                result = cursor.fetchall()[0]
+                cursor.close()
         finally:
-            self.conn.rollback()
+            # connection.close()
+            pass
 
         return result
 
@@ -93,17 +105,10 @@ class app_db:
                 cursor.callproc('files_with_dups', [ start_idx, rows_per_page ])
                 result = cursor.fetchall()
         finally:
-            self.conn.rollback()
+            # connection.close()
+            pass
 
-        return render_template(
-            'list_files_with_dups.html',
-            title='Duplicate Files',
-            description='List of Known Files with counts of duplicates',
-            start_idx=start_idx,
-            rows_per_page=rows_per_page,
-            row_count=len(result),
-            files=result
-        )
+        return result
 
 def get_hit_count():
     retries = 5
@@ -132,11 +137,48 @@ def welcome():
     #return 'Hello World! I have been seen {} times.\n'.format(count)
     return db.welcome()
 
-@app.route('/files_with_dups', defaults={ 'start_idx': 1, 'rows_per_page': 20 })
-@app.route('/files_with_dups/<int:start_idx>/<int:rows_per_page>')
-def files_with_dups(start_idx, rows_per_page):
+@app.route('/files_with_dups', defaults={ 'start_row': 1, 'rows_per_page': 20 }, methods=['GET', 'POST'])
+# @app.route('/files_with_dups/<int:start_idx>/<int:rows_per_page>')
+def files_with_dups(start_row, rows_per_page):
     db = app_db(connection_parameters)
-    return db.list_files_with_dups(start_idx, rows_per_page)
+    if request.method == 'POST':
+        start_row = int(request.form['start_row'])
+        rows_per_page = int(request.form['rows_per_page'])
+        if 'pager' in request.form:
+            if request.form['pager'] == 'previous':
+                start_row = max(start_row-rows_per_page, 0)
+            elif request.form['pager'] == 'next':
+                start_row += rows_per_page
+            else:
+                raise BadRequest(str(request))
+        
+    result = db.list_files_with_dups(start_row-1, rows_per_page)
+
+    previous_page_status = ''
+    if start_row == 1:
+        # disable previous button
+        previous_page_status = 'disabled' 
+
+    next_page_status = ''
+    if len(result) < rows_per_page:
+        # disable next button
+        next_page_status = 'disabled' ,
+        
+    # adjust "bytes" to mb
+    # print('result is ' + str(result), file=sys.stderr)    
+    result = [[r[0], f'{ (r[1] / 1048576):.0f}', r[2]] for r in result]
+    
+    return render_template(
+            'list_files_with_dups.html',
+            title='Duplicate Files',
+            description='List of Known Files with counts of duplicates',
+            start_row=start_row,
+            rows_per_page=rows_per_page,
+            row_count=len(result),
+            next_page_status=next_page_status, 
+            previous_page_status=previous_page_status, 
+            files=result
+    )
 
 @app.route('/hello')
 def hello():

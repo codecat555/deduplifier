@@ -193,7 +193,7 @@ DECLARE
     result count_type[];
 BEGIN
     result := ARRAY(
-        SELECT COUNT(*), SUM(size_in_bytes), COALESCE(checksum,'TOTAL') checksum FROM file
+        SELECT COUNT(*), COALESCE(SUM(size_in_bytes), 0), COALESCE(checksum,'TOTAL') checksum FROM file
         GROUP BY ROLLUP(checksum)
         HAVING COUNT(*) > 1
         ORDER BY COUNT(*) DESC
@@ -205,6 +205,7 @@ END $$;
 DO $$ BEGIN
     CREATE TYPE files_with_dups_type AS (
         dup_count bigint,
+        dup_bytes bigint,
         name text
     );
 EXCEPTION
@@ -224,13 +225,16 @@ BEGIN
     raise notice 'files_with_dups: offset=%, limit=%', offset_in, limit_in;
 
     RETURN QUERY
-        SELECT COUNT(*) "count", MIN(f.name) "name"
+        SELECT COUNT(*) "count", COALESCE(SUM(size_in_bytes), 0) "bytes", MIN(f.name) "name"
         --INTO v_files
         FROM file f
         JOIN location l ON f.location_id = l.id
         GROUP BY f.name, f.checksum
-        --HAVING COUNT(*) > 2
-        ORDER BY f.name OFFSET offset_in LIMIT limit_in
+        HAVING COUNT(*) > 1
+        --ORDER BY f.name OFFSET offset_in LIMIT limit_in
+        --ORDER BY COUNT(*) DESC OFFSET offset_in LIMIT limit_in
+        -- ORDER BY COUNT(*) ASC OFFSET offset_in LIMIT limit_in
+        ORDER BY "bytes" DESC OFFSET offset_in LIMIT limit_in
     ;
 
 --    RETURN v_files;

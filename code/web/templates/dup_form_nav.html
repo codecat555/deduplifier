@@ -1,0 +1,8 @@
+<form class="nav" action="/files_with_dups" method = "POST">
+    <input type="hidden" name="start_row" value={{start_row}} />
+    <input type="hidden" name="rows_per_page" value={{rows_per_page}} />
+    <td colspan="4">
+        <button name="pager" value="previous" type="submit" {{previous_page_status}}>Previous</button>
+        <button name="pager" value="next" type="submit" {{next_page_status}}>Next</button>
+    </td>
+</form>
