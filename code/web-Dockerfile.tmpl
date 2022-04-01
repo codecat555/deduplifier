@@ -4,7 +4,7 @@ ENV FLASK_RUN_HOST=0.0.0.0
 ENV FLASK_ENV=development
 RUN apt-get update && apt-get upgrade -y
 RUN apt install -y tzdata gcc musl postgresql-client
-COPY requirements.txt /tmp/requirements.txt
+COPY web-requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 EXPOSE ___WEB_EXTERNAL_PORT___
 CMD ["flask", "run"]
