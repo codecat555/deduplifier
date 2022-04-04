@@ -4,7 +4,8 @@
 
 {% block datagrid_header %} {{ super() }} {% endblock %}
 
-    {% for column_name in headers %}    
+    <div class="datagrid-header">#</div>
+    {% for column_tag, column_name in headers %}    
       <div class="datagrid-header">{{column_name}}</div>
     {% endfor %}
     {% for row in files %}    
