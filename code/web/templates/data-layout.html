@@ -1,0 +1,37 @@
+{% extends 'layout.html' %}
+
+{% block datagrid_header %}
+    <div class="wrapper">
+      <div class="center-block">
+
+{% block page_header %}
+        <div class="container">
+            <h1>{{title}}</h1>
+            <h2>{{description}}</h2>
+        </div>
+{% endblock %}
+
+        <div class="navbar-top">
+          <div class="navargs-top">
+            {% include 'dup_form_args.html' %}
+          </div>
+          {% include 'dup_form_nav.html' %}
+        </div>
+        
+        <div class="datagrid-wrapper">
+          <div class="datagrid">
+{% endblock %}
+            
+{% block datagrid_footer %}
+          </div>
+        </div>
+
+        <div class="navbar-bottom">
+          {% include 'dup_form_nav.html' %}
+          <div class="navargs-bottom">
+            {% include 'dup_form_args.html' %}
+          </div>
+        </div>
+    </div>
+{% endblock %}
+    

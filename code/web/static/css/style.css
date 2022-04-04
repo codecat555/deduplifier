@@ -1,68 +1,66 @@
-a {
-    text-decoration: none;
-    display: inline-block;
-    padding: 8px 16px;
+
+.wrapper {
+    display: grid;
+    grid-template-columns: 1fr 4fr 1fr;
 }
 
-a:hover {
-    background-color: #ddd;
-    color: black;
+.center-block {
+    grid-column: 2;
 }
 
-.previous {
-    background-color: #f1f1f1;
-    color: black;
+button, input[type="submit"] {
+    font-size: inherit
 }
 
-.next {
-    background-color: #04AA6D;
-    color: white;
+.datagrid {
+    display: grid;
+    grid-template-columns: repeat(3, max-content) auto;
+    border-top: 1px solid black;
+    border-left: 1px solid black;
 }
 
-.round {
-    border-radius: 50%;
+.datagrid > div {
+    border-bottom: 1px solid black;
+    border-right: 1px solid black;
+    padding: 5px;
 }
-table, th, td {
+
+.datagrid-header {
+    text-align: center;
+    font-weight: bold;
+}
+
+.navargs-top {
+    margin-bottom: 15px;
+}
+
+.navargs-bottom {
+    margin-top: 15px;
+}
+
+.navargs {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
     border: 1px solid black;
-    border-collapse: collapse;
-    padding: 4px;6
+    background-color: #cbd2f8;
+    padding: 5px;
 }
 
-results_table {
-    width: 100%;
-    border: 1px solid black;
-    border-collapse: collapse;
+.navargs-left {
+    justify-self: left;
 }
 
-/* .nav {
-    display: inline-block;
-    display: -webkit-flex;
-    display: flex;
-    -webkit-justify-content: space-between;
-    justify-content: space-between;
+.navargs-center {
+    justify-self: center;
 }
 
-.nav input[type="number"] {
-    width: 80px;
-} */
-
-.results_block button[name="pager"][value="previous"] {
-    float: left;
+.navargs-right {
+    justify-self: end;
 }
 
-.results_block button[name="pager"][value="next"] {
-    float: right;
-}
-
-/* .nav input[name="start_idx"] {
-    float: left;
-} */
-
-.nav label[name="rows_per_page"] {
-    text-align: right;
-    float: right;
-}
-
-.nav input[name="rows_per_page"] {
-    float: right;
+.navpager {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-column-gap: 80%;
+    margin: 0px;
 }
