@@ -1,19 +1,21 @@
 <form action="{{post_url}}" method="POST">
     <div class="navbar">
         <div class="navargs">
-        <tr><td>
-            <div class="navargs-left">
-                <label>Start Row</label>
-                <input type="number" name="start_row" min='1' value={{start_row}} />
-            </div>
-            <div class="navargs-center">
-                <label name="rows_per_page">Rows/Page</label>
-                <input type="number" name="rows_per_page" min='1' value={{rows_per_page}} />
-            </div>
-            <div class="navargs-right">
-                <input type="submit" value="Submit" />
-            </div>
-        </td></tr>
-    </div>
+            <input type="hidden" name="sort_field" value={{sort_field}} />
+            <input type="hidden" name="sort_direction" value={{sort_direction}} />
+            <tr><td>
+                <div class="navargs-left">
+                    <label>Start Row</label>
+                    <input type="number" name="start_row" min='1' value={{start_row}} />
+                </div>
+                <div class="navargs-center">
+                    <label name="rows_per_page">Rows/Page</label>
+                    <input type="number" name="rows_per_page" min='1' value={{rows_per_page}} />
+                </div>
+                <div class="navargs-right">
+                    <input type="submit" value="Submit" />
+                </div>
+            </td></tr>
+        </div>
     </div>
 </form>
