@@ -203,6 +203,7 @@ BEGIN
 END $$;
 
 DO $$ BEGIN
+    -- replace this with more general count_type above?
     CREATE TYPE files_with_dups_type AS (
         duplicates bigint,
         total_bytes bigint,

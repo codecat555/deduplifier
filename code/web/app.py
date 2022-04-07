@@ -136,6 +136,42 @@ def welcome():
     #return 'Hello World! I have been seen {} times.\n'.format(count)
     return db.welcome()
 
+#                           List of relations
+#  Schema |             Name              |       Type        |  Owner
+# --------+-------------------------------+-------------------+----------
+#  public | all_subpaths                  | materialized view | postgres
+#  public | dir_totals                    | materialized view | postgres
+#  public | dir_totals_expansion          | materialized view | postgres
+#  public | dup_counts_for_path           | materialized view | postgres
+#  public | dup_detail                    | materialized view | postgres
+#  public | dup_dirs                      | materialized view | postgres
+#  public | dup_dirs_expansion            | materialized view | postgres
+#  public | duplicate_file_count_for_path | materialized view | postgres
+#  public | duplicate_files               | materialized view | postgres
+#  public | exact_dup_dirs                | materialized view | postgres
+#  public | exif_tag                      | table             | postgres
+#  public | exif_tag_id_seq               | sequence          | postgres
+#  public | file                          | table             | postgres
+#  public | file_dirs_with_totals         | materialized view | postgres
+#  public | file_dup_groups               | materialized view | postgres
+#  public | file_id_seq                   | sequence          | postgres
+#  public | host                          | table             | postgres
+#  public | host_id_seq                   | sequence          | postgres
+#  public | image                         | table             | postgres
+#  public | image_id_seq                  | sequence          | postgres
+#  public | image_tag                     | table             | postgres
+#  public | location                      | table             | postgres
+#  public | location_id_seq               | sequence          | postgres
+#  public | path                          | table             | postgres
+#  public | path_id_seq                   | sequence          | postgres
+#  public | paths                         | materialized view | postgres
+#  public | qprog0                        | sequence          | postgres
+#  public | subdir_counts_for_path        | materialized view | postgres
+#  public | unique_file_count_for_path    | materialized view | postgres
+#  public | unique_files                  | materialized view | postgres
+#  public | volume                        | table             | postgres
+#  public | volume_id_seq                 | sequence          | postgres
+# (32 rows)
 
 @app.route('/files_with_dups', defaults={ 'start_row': 1, 'rows_per_page': 20, 'sort_field': 'bytes', 'sort_direction': 'desc' }, methods=['GET', 'POST'])
 def files_with_dups(start_row, rows_per_page, sort_field, sort_direction):
